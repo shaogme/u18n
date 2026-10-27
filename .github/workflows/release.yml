@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "u18n-cli-v[0-9]+.*"
+      - "u18n-cli-v[0-9]*"
   workflow_dispatch:
     inputs:
       tag:
