@@ -12,11 +12,11 @@ keywords = ["i18n", "localization", "cli", "translation", "compiler"]
 categories = ["internationalization", "localization", "command-line-utilities"]
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/{ bin }-{ target }.tar.gz"
+pkg-url = "{ repo }/releases/download/u18n-cli-v{ version }/{ bin }-{ target }.tar.gz"
 bin-dir = "{ bin }{ binary-ext }"
 
 [package.metadata.binstall.overrides.'cfg(target_os = "windows")']
-pkg-url = "{ repo }/releases/download/v{ version }/{ bin }-{ target }.zip"
+pkg-url = "{ repo }/releases/download/u18n-cli-v{ version }/{ bin }-{ target }.zip"
 pkg-fmt = "zip"
 
 [dependencies]
