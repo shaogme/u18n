@@ -1,0 +1,18 @@
+[package]
+name = "u18n-schema"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A no_std parser for typed u18n schema source files."
+documentation = "https://docs.rs/u18n-schema"
+keywords = ["i18n", "localization", "parser", "schema"]
+categories = ["internationalization", "localization", "parser-implementations", "no-std"]
+
+[dependencies]
+u18n-ast = { workspace = true }
+
+[lints]
+workspace = true

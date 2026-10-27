@@ -1,0 +1,6 @@
+too-many-arguments-threshold = 5
+absolute-paths-max-segments = 2
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

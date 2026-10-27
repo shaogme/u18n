@@ -1,0 +1,5 @@
+locale en;
+message alpha.one = "KEYED_ALPHA_UNIQUE_PAYLOAD_71A9";
+message beta.two = "KEYED_BETA_UNIQUE_PAYLOAD_82B0";
+message gamma.three = "KEYED_GAMMA_UNIQUE_PAYLOAD_93C1";
+message delta.four = "KEYED_DELTA_UNIQUE_PAYLOAD_A4D2";

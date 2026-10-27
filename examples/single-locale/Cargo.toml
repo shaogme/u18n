@@ -1,0 +1,19 @@
+[package]
+name = "u18n-single-locale"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A compile fixture for generated single-locale catalogs."
+publish = false
+
+[dependencies]
+u18n = { path = "../../crates/u18n" }
+
+[build-dependencies]
+u18n-compiler.workspace = true
+
+[lints]
+workspace = true

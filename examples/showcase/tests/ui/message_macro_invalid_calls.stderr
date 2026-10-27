@@ -1,0 +1,57 @@
+error: missing named message argument `gender`
+  --> tests/ui/message_macro_invalid_calls.rs:10:5
+   |
+10 |     m_cart_sitems!(catalog, { count, owner });
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the macro `m_cart_sitems` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: unknown named message argument `extra`
+  --> tests/ui/message_macro_invalid_calls.rs:11:53
+   |
+11 |     m_cart_sitems!(catalog, { count, owner, gender, extra: "value" });
+   |                                                     ^^^^^
+
+error: duplicate named message argument `gender`
+  --> tests/ui/message_macro_invalid_calls.rs:12:53
+   |
+12 |     m_cart_sitems!(catalog, { count, owner, gender, gender });
+   |                                                     ^^^^^^
+
+error: cannot mix named and positional message arguments
+  --> tests/ui/message_macro_invalid_calls.rs:13:29
+   |
+13 |     m_cart_sitems!(catalog, { count, owner, gender }, "other");
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: expected 3 positional message arguments but received 2
+  --> tests/ui/message_macro_invalid_calls.rs:14:5
+   |
+14 |     m_cart_sitems!(catalog, count, owner);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the macro `m_cart_sitems` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: expected 3 positional message arguments but received 4
+  --> tests/ui/message_macro_invalid_calls.rs:15:5
+   |
+15 |     m_cart_sitems!(catalog, count, owner, gender, "extra");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the macro `m_cart_sitems` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+  --> tests/ui/message_macro_invalid_calls.rs:16:5
+   |
+16 |     m_cart_sitems!(catalog, { count: "two", owner, gender });
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     expected `PluralCount`, found `&str`
+   |     arguments to this enum variant are incorrect
+   |
+note: tuple variant defined here
+  --> $WORKSPACE/crates/u18n/src/catalog.rs
+   |
+   |     PluralCount(PluralCount),
+   |     ^^^^^^^^^^^
+   = note: this error originates in the macro `::u18n::__invoke_message` which comes from the expansion of the macro `m_cart_sitems` (in Nightly builds, run with -Z macro-backtrace for more info)

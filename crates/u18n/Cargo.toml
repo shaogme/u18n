@@ -1,0 +1,19 @@
+[package]
+name = "u18n"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A no_std runtime for rendering compiled, typed localization catalogs."
+documentation = "https://docs.rs/u18n"
+keywords = ["i18n", "localization", "runtime", "no-std", "message-catalogs"]
+categories = ["internationalization", "localization", "no-std"]
+
+[dependencies]
+u18n-macros.workspace = true
+u18n-locale-tag.workspace = true
+
+[lints]
+workspace = true

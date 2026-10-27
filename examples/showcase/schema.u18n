@@ -1,0 +1,36 @@
+schema 1;
+
+message app.title();
+message cart.items(count: plural_count, owner: string, gender: string);
+message cart.decimal_count(value: plural_decimal);
+message cart.total(amount: number, currency: string);
+
+/// Summarizes an order with a named argument form.
+message checkout.order_summary(
+    customer: string,
+    product: string,
+    quantity: plural_count,
+    total: number,
+    currency: string
+);
+
+/// Shows exact decimal and currency formatting through the caller's adapter.
+message cart.typed_total(amount: decimal, charge: money);
+
+/// Describes the calendar date, wall-clock time, and absolute event instant.
+message event.when(
+    /// The date shown to the user.
+    day: date,
+    /// The local wall-clock time.
+    clock: time,
+    /// The absolute event instant.
+    moment: instant
+);
+
+/// Identifies an ordinal position.
+message rank.position(
+    /// The position in the ranking.
+    rank: ordinal_count
+);
+
+message report.values(first: number, second: number);

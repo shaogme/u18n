@@ -1,0 +1,26 @@
+[package]
+name = "u18n-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Command-line tools for compiling u18n catalogs, extracting translator context, and reporting coverage."
+documentation = "https://docs.rs/u18n-cli"
+keywords = ["i18n", "localization", "cli", "translation", "compiler"]
+categories = ["internationalization", "localization", "command-line-utilities"]
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ bin }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.'cfg(target_os = "windows")']
+pkg-url = "{ repo }/releases/download/v{ version }/{ bin }-{ target }.zip"
+pkg-fmt = "zip"
+
+[dependencies]
+u18n-compiler = { workspace = true }
+
+[lints]
+workspace = true

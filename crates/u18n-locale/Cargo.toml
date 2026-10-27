@@ -1,0 +1,19 @@
+[package]
+name = "u18n-locale"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A no_std parser for u18n locale catalogs and typed message patterns."
+documentation = "https://docs.rs/u18n-locale"
+keywords = ["i18n", "localization", "parser", "bcp47", "messages"]
+categories = ["internationalization", "localization", "parser-implementations", "no-std"]
+
+[dependencies]
+u18n-ast = { workspace = true }
+u18n-locale-tag = { workspace = true }
+
+[lints]
+workspace = true

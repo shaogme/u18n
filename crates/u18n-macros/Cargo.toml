@@ -1,0 +1,23 @@
+[package]
+name = "u18n-macros"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Procedural macro helpers for generated u18n message APIs."
+documentation = "https://docs.rs/u18n-macros"
+keywords = ["i18n", "localization", "proc-macro", "message-catalogs"]
+categories = ["internationalization", "localization", "development-tools::procedural-macro-helpers"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[lints]
+workspace = true

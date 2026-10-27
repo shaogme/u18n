@@ -1,0 +1,6 @@
+locale es-419 fallback en;
+
+message app.title = "Carrito pequeño";
+message cart.items = "{owner} {count, plural, =0 {no tiene ningún artículo} one {tiene # artículo} many {tiene # artículos} other {tiene # artículos}} en el carrito. {gender, select, female {Gracias, señora.} male {Gracias, señor.} other {Gracias.}}";
+message checkout.order_summary = "{customer} pidió {quantity, plural, one {# {product}} many {# × {product}} other {# × {product}}} por {total} {currency}.";
+message report.values = "{first}/{second}";
