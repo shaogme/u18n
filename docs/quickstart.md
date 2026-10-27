@@ -10,10 +10,10 @@ Add the runtime to your application and the compiler as a build dependency:
 
 ```toml
 [dependencies]
-u18n = "0.1.2"
+u18n = "0.1.3"
 
 [build-dependencies]
-u18n-compiler = "0.1.2"
+u18n-compiler = "0.1.3"
 ```
 
 Create these files in the package root:
