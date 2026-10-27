@@ -123,8 +123,13 @@ impl LocaleTagEmitter {
     ) -> Result<(), FmtError> {
         writeln!(output)?;
         writeln!(output, "#[derive(Clone, Copy, Debug, Eq, PartialEq)]")?;
+        writeln!(
+            output,
+            "/// A locale included in the generated catalog set."
+        )?;
         writeln!(output, "pub enum LocaleTag {{")?;
         for variant in &prepared.variants {
+            writeln!(output, "    /// The `{}` locale.", variant)?;
             writeln!(output, "    {variant},")?;
         }
         writeln!(output, "}}")?;
@@ -446,6 +451,10 @@ impl LocaleTagEmitter {
             return Err(FmtError);
         }
         writeln!(output, "impl LocaleTag {{")?;
+        writeln!(
+            output,
+            "    /// Returns this locale's canonical language tag."
+        )?;
         writeln!(output, "    pub const fn as_str(&self) -> &'static str {{")?;
         writeln!(output, "        match self {{")?;
         for (locale, variant) in locales.iter().zip(variants) {
@@ -458,6 +467,10 @@ impl LocaleTagEmitter {
         writeln!(output, "        }}")?;
         writeln!(output, "    }}")?;
         writeln!(output)?;
+        writeln!(
+            output,
+            "    /// Returns this locale's generated runtime handle."
+        )?;
         writeln!(
             output,
             "    pub const fn as_locale(&self) -> &'static Locale {{"
@@ -473,6 +486,10 @@ impl LocaleTagEmitter {
         writeln!(output, "        }}")?;
         writeln!(output, "    }}")?;
         writeln!(output)?;
+        writeln!(
+            output,
+            "    /// Resolves a locale tag from one of the generated catalogs."
+        )?;
         writeln!(
             output,
             "    pub fn from_catalog(catalog: &'static Catalog) -> Result<Self, &'static str> {{"
@@ -492,6 +509,10 @@ impl LocaleTagEmitter {
         )?;
         writeln!(output, "    }}")?;
         writeln!(output)?;
+        writeln!(
+            output,
+            "    /// Returns this locale's complete generated catalog."
+        )?;
         writeln!(
             output,
             "    pub const fn as_catalog(&self) -> &'static Catalog {{"
@@ -547,6 +568,10 @@ impl LocaleTagEmitter {
         )?;
         writeln!(output, "    }}")?;
         writeln!(output)?;
+        writeln!(
+            output,
+            "    /// Resolves an unsupported or regional tag through generated locale fallbacks."
+        )?;
         writeln!(
             output,
             "    pub fn fallback(locale_tag: &str) -> Result<Self, &'static str> {{"

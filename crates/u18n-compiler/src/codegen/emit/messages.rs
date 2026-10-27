@@ -69,6 +69,11 @@ impl MessageEmitter {
     }
 
     fn emit_macro(output: &mut String, plan: &MessagePlan<'_>) -> Result<(), FmtError> {
+        writeln!(
+            output,
+            "/// Renders the `{}` message with its schema-checked arguments.",
+            Self::key_text(&plan.message.key)
+        )?;
         writeln!(output, "#[macro_export]")?;
         writeln!(output, "macro_rules! {} {{", plan.macro_name)?;
         if plan.needs_formatter {

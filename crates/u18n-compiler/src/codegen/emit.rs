@@ -146,6 +146,7 @@ impl SourceEmitter {
         message_shards: &[LoweredMessageShard],
         text_pool: &str,
     ) -> Result<(), FmtError> {
+        writeln!(output, "/// Generated catalogs and locale handles.")?;
         writeln!(output, "pub mod catalogs {{")?;
         let imports = Self::store_imports(store);
         writeln!(output, "    use u18n::{{{}}};", imports.join(", "))?;
@@ -165,6 +166,11 @@ impl SourceEmitter {
         Self::emit_rule_sets(output, &store.rules, 8)?;
         writeln!(output, "    }};")?;
         for locale in locales {
+            writeln!(
+                output,
+                "    /// Generated data for locale `{}`.",
+                locale.locale_tag
+            )?;
             writeln!(output, "    pub mod {} {{", locale.module)?;
             if locale.bindings.is_empty() {
                 writeln!(
@@ -179,8 +185,18 @@ impl SourceEmitter {
             }
             writeln!(
                 output,
+                "        /// Locale handle for `{}`.",
+                locale.locale_tag
+            )?;
+            writeln!(
+                output,
                 "        pub static LOCALE: Locale = Locale::new_trusted({}, {:?});",
                 locale.locale_index, locale.locale_tag
+            )?;
+            writeln!(
+                output,
+                "        /// Full catalog handle for `{}`.",
+                locale.locale_tag
             )?;
             writeln!(
                 output,
@@ -318,6 +334,10 @@ impl SourceEmitter {
     }
 
     fn emit_translation_macro(output: &mut String, atomic_locale: bool) -> Result<(), FmtError> {
+        writeln!(
+            output,
+            "/// Dispatches a literal message key to its generated, schema-checked message macro."
+        )?;
         writeln!(output, "#[macro_export]")?;
         writeln!(output, "macro_rules! t {{")?;
         writeln!(output, "    ($key:literal $(, $($arguments:tt)*)?) => {{")?;
@@ -757,15 +777,31 @@ impl SourceEmitter {
             ]);
         }
         if !store.formats.is_empty() {
-            imports.extend([
-                "CurrencyPrecision",
-                "FormatNode",
-                "FormatOptions",
-                "FormatStyle",
-                "Grouping",
-                "Precision",
-                "Rounding",
-            ]);
+            imports.extend(["FormatNode", "FormatOptions", "Rounding"]);
+            if store
+                .formats
+                .iter()
+                .any(|format| matches!(format.options, AstFormatOptions::Currency { .. }))
+            {
+                imports.push("CurrencyPrecision");
+            }
+            if store.formats.iter().any(|format| {
+                matches!(
+                    format.options,
+                    AstFormatOptions::Date { .. }
+                        | AstFormatOptions::Time { .. }
+                        | AstFormatOptions::Instant { .. }
+                )
+            }) {
+                imports.push("FormatStyle");
+            }
+            if store
+                .formats
+                .iter()
+                .any(|format| matches!(format.options, AstFormatOptions::Decimal { .. }))
+            {
+                imports.extend(["Grouping", "Precision"]);
+            }
         }
         if !store.selects.is_empty() {
             imports.extend(["SelectBranchRecord", "SelectNode"]);

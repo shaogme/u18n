@@ -171,7 +171,9 @@ fn locale_index_uses_normalized_string_binary_search_keys() {
             .get(fallback_start..)
             .is_some_and(|fallback| fallback.contains("Ok(Self::En)"))
     );
-    assert!(source.contains("pub enum LocaleTag {\n        En,\n        Fa,"));
+    assert!(source.contains(
+        "pub enum LocaleTag {\n        /// The `En` locale.\n        En,\n        /// The `Fa` locale.\n        Fa,"
+    ));
     assert!(!source.contains("index: usize"));
     assert!(source.contains(
         "LOCALE_INDEX.binary_search_by(|entry| tag.cmp_ignore_ascii_case(entry.tag).reverse())"
@@ -247,7 +249,9 @@ fn generated_locale_variants_encode_numeric_and_private_use_subtags() {
         .expect("registered numeric-region and private-use tags should compile");
     let source = generated.source();
 
-    assert!(source.contains("pub enum LocaleTag {\n        EnXPrivate,\n        Es419,"));
+    assert!(source.contains(
+        "pub enum LocaleTag {\n        /// The `EnXPrivate` locale.\n        EnXPrivate,\n        /// The `Es419` locale.\n        Es419,"
+    ));
     assert!(source.contains("Self::Es419 => \"es-419\""));
     assert!(source.contains("Self::EnXPrivate => \"en-x-private\""));
     assert!(source.contains("locale: LocaleTag::Es419"));

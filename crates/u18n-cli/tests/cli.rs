@@ -419,7 +419,8 @@ fn compiles_decimal_cardinal_arguments_and_exact_catalog_lookup_helpers()
     check(generated.contains("macro_rules! m_cart_sitems"));
     check(generated.contains("count, plural_decimal"));
     check(generated.contains("PluralOperand::V"));
-    check(generated.contains("pub enum LocaleTag {\n        En,"));
+    check(generated.contains("pub enum LocaleTag {"));
+    check(generated.contains("/// The `En` locale.\n        En,"));
     check(generated.contains("static LOCALE_INDEX: &[LocaleIndexEntry]"));
     check(generated.contains(
         "LOCALE_INDEX.binary_search_by(|entry| tag.cmp_ignore_ascii_case(entry.tag).reverse())",
