@@ -1,0 +1,2 @@
+locale en;
+message app.title = "Single catalog";

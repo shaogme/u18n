@@ -1,0 +1,21 @@
+[package]
+name = "u18n-compiler"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Compile typed schemas and locale catalogs into static Rust localization catalogs."
+documentation = "https://docs.rs/u18n-compiler"
+keywords = ["i18n", "localization", "compiler", "cldr", "message-catalogs"]
+categories = ["internationalization", "localization", "development-tools::build-utils"]
+
+[dependencies]
+u18n-ast = { workspace = true }
+u18n-locale = { workspace = true }
+u18n-locale-tag = { workspace = true }
+u18n-schema = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+locale en;
+
+message app.title = "Tiny Cart";
+message cart.items = "{owner} has {count, plural, =0 {no items} one {# item} other {# items}} in the cart. {gender, select, female {She has it covered.} male {He has it covered.} other {They have it covered.}}";
+message cart.decimal_count = "{value, plural, =2 {exact #} one {# item} other {# items}}";
+message cart.total = "Total: {amount} {currency}";
+message checkout.order_summary = "{customer} ordered {quantity, plural, one {# {product}} other {# × {product}}} for {total} {currency}.";
+message cart.typed_total = "Total: {amount, format, decimal, grouping: auto, precision: 2, rounding: half_even}; charge: {charge, format, currency, precision: currency, rounding: half_even}";
+message event.when = "{day, format, date, style: long} at {clock, format, time, style: short}; logged {moment, format, instant, style: medium, time_zone: \"UTC\"}";
+message rank.position = "{rank, ordinal, one {#st} two {#nd} few {#rd} other {#th}}";
+message report.values = "{first}/{second}";

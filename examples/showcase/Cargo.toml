@@ -1,0 +1,25 @@
+[package]
+name = "u18n-showcase"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A demonstration package for the u18n compile-time localization workflow."
+documentation = "https://docs.rs/u18n-showcase"
+keywords = ["i18n", "localization", "message-catalogs", "showcase"]
+categories = ["internationalization", "localization"]
+publish = false
+
+[dependencies]
+u18n = { path = "../../crates/u18n" }
+
+[build-dependencies]
+u18n-compiler.workspace = true
+
+[dev-dependencies]
+trybuild = "1"
+
+[lints]
+workspace = true

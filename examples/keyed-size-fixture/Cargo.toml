@@ -1,0 +1,23 @@
+[package]
+name = "u18n-keyed-size-fixture"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["one"]
+one = []
+several = []
+all = []
+dynamic = []
+
+[dependencies]
+u18n = { path = "../../crates/u18n" }
+
+[build-dependencies]
+u18n-compiler.workspace = true
+
+[lints]
+workspace = true

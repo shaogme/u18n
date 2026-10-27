@@ -1,0 +1,47 @@
+[workspace]
+members = [
+    "crates/u18n-ast",
+    "crates/u18n-locale-tag",
+    "crates/u18n-locale",
+    "crates/u18n-schema",
+    "crates/u18n-compiler",
+    "crates/u18n-macros",
+    "crates/u18n",
+    "crates/u18n-cli",
+    "examples/single-locale",
+    "examples/showcase",
+    "examples/keyed-size-fixture",
+]
+resolver = "3"
+
+[workspace.package]
+authors = ["Shao G. <shaogme@gmail.com>"]
+edition = "2024"
+homepage = "https://github.com/shaogme/u18n"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/shaogme/u18n"
+version = "0.1.0"
+
+[workspace.dependencies]
+u18n-ast = { version = "0.1.0", path = "crates/u18n-ast" }
+u18n-locale-tag = { version = "0.1.0", path = "crates/u18n-locale-tag" }
+u18n-locale = { version = "0.1.0", path = "crates/u18n-locale" }
+u18n-schema = { version = "0.1.0", path = "crates/u18n-schema" }
+u18n-compiler = { version = "0.1.0", path = "crates/u18n-compiler" }
+u18n-macros = { version = "0.1.0", path = "crates/u18n-macros" }
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+too_many_arguments = "deny"
+mod_module_files = "deny"
+absolute_paths = "deny"
+print_stdout = "deny"
+dbg_macro = "deny"
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+panic_in_result_fn = "warn"
+indexing_slicing = "warn"
