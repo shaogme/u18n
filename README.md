@@ -28,10 +28,10 @@ Add the runtime and build-time compiler to your application:
 
 ```toml
 [dependencies]
-u18n = "0.1.0"
+u18n = "0.1.1"
 
 [build-dependencies]
-u18n-compiler = "0.1.0"
+u18n-compiler = "0.1.1"
 ```
 
 Create `schema.u18n`:

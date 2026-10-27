@@ -20,15 +20,15 @@ edition = "2024"
 homepage = "https://github.com/shaogme/u18n"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/shaogme/u18n"
-version = "0.1.0"
+version = "0.1.1"
 
 [workspace.dependencies]
-u18n-ast = { version = "0.1.0", path = "crates/u18n-ast" }
-u18n-locale-tag = { version = "0.1.0", path = "crates/u18n-locale-tag" }
-u18n-locale = { version = "0.1.0", path = "crates/u18n-locale" }
-u18n-schema = { version = "0.1.0", path = "crates/u18n-schema" }
-u18n-compiler = { version = "0.1.0", path = "crates/u18n-compiler" }
-u18n-macros = { version = "0.1.0", path = "crates/u18n-macros" }
+u18n-ast = { version = "0.1.1", path = "crates/u18n-ast" }
+u18n-locale-tag = { version = "0.1.1", path = "crates/u18n-locale-tag" }
+u18n-locale = { version = "0.1.1", path = "crates/u18n-locale" }
+u18n-schema = { version = "0.1.1", path = "crates/u18n-schema" }
+u18n-compiler = { version = "0.1.1", path = "crates/u18n-compiler" }
+u18n-macros = { version = "0.1.1", path = "crates/u18n-macros" }
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
