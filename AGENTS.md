@@ -87,9 +87,9 @@ fn process_order(params: OrderParams) {}
 
 ### 2.3 Blank Line Isolation for Top-Level and Sibling Definitions
 
-Within the same immediate scope, adjacent definitions governed by `item_spacing` rules must generally be separated by exactly one blank line.
+Within the same immediate scope, `item_spacing` compares adjacent definitions of these kinds: `struct`, `enum`, `union`, type alias, trait, constant, `static`, function, and `impl` block. Every checked pair must have exactly one blank line, including an `impl` block next to any other checked kind and two adjacent `impl` blocks.
 
-**Exception:** Consecutive `const`, `static`, or `type` definitions sharing the identical AST kind should have no blank lines between them. However, when these three categories transition between different kinds, or when they border other inspected items, exactly one blank line is required. `const fn` declarations are categorized as functions. Unchecked items continue to serve as structural boundaries and are not bridged across when comparing items on either side.
+**Exceptions:** Two consecutive constants, two consecutive `static` items, or two consecutive type aliases of the same AST kind must have no blank line between them. `const fn` declarations are functions, not constants, so they require one blank line next to every checked kind, including another function. These rules apply in both directions; for example, both `struct` followed by `impl` and `impl` followed by `struct` require one blank line. Items outside the listed kinds remain structural boundaries: comparisons do not skip over them to reach a later checked item. Pairs whose `cfg` conditions are provably mutually exclusive are not compared.
 
 ```rust
 const FIRST: u8 = 1;

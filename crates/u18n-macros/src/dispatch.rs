@@ -73,6 +73,7 @@ impl SelfKey {
         Ok(format_ident!("m_{encoded}", span = key.span()))
     }
 }
+
 impl Parse for DispatchInvocation {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let key = input.parse::<LitStr>()?;
@@ -156,6 +157,7 @@ impl DispatchArguments {
         matches!(name.unraw().to_string().as_str(), "locale" | "formatter")
     }
 }
+
 impl TranslationDispatcher {
     pub(super) fn expand(input: TokenStream2) -> Result<TokenStream2> {
         let invocation = parse2::<DispatchInvocation>(input)?;
@@ -183,6 +185,7 @@ impl TranslationDispatcher {
         })
     }
 }
+
 #[test]
 fn encodes_raw_and_escaped_message_keys_like_the_compiler() {
     let raw = parse_str::<LitStr>(r####"r#"cart.decimal_count"#"####);

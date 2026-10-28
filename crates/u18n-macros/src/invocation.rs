@@ -67,6 +67,7 @@ impl Parse for InvocationMetadata {
         })
     }
 }
+
 impl InvocationMetadata {
     fn validate_parameter_names(parameters: &[ParameterSpec]) -> Result<()> {
         let mut names = BTreeSet::new();
@@ -99,6 +100,7 @@ impl InvocationMetadata {
             && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
     }
 }
+
 impl Parse for ParameterSpec {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let parameter_content;
@@ -229,6 +231,7 @@ impl NamedField {
         )
     }
 }
+
 impl InvocationExpansion {
     pub(super) fn expand(input: TokenStream2) -> Result<TokenStream2> {
         let mut tokens = input.into_iter();
@@ -265,6 +268,7 @@ impl InvocationExpansion {
         emit_render_expression(metadata, locale, message_data, formatter, arguments)
     }
 }
+
 fn take_group(
     tokens: &mut impl Iterator<Item = TokenTree>,
     delimiter: Delimiter,
