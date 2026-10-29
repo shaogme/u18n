@@ -118,7 +118,7 @@ impl<'a> SourceParser<'a> {
                 break;
             }
             let message_start = parser.position;
-            let declaration = (|| {
+            let declaration: Result<LocalizedMessage, LocaleParseError> = (|| {
                 parser.keyword("message")?;
                 parser.require_trivia("expected whitespace after `message`")?;
                 parser.skip_trivia();
@@ -144,8 +144,13 @@ impl<'a> SourceParser<'a> {
             match declaration {
                 Ok(message) => messages.push(message),
                 Err(error) => {
+                    let unterminated_pattern = error.message() == "unterminated message pattern";
                     errors.push(error);
-                    parser.recover_to_message(message_start);
+                    if unterminated_pattern {
+                        parser.position = parser.source.len();
+                    } else {
+                        parser.recover_to_message(message_start);
+                    }
                     if parser.is_eof() {
                         break;
                     }
@@ -278,10 +283,7 @@ impl<'a> SourceParser<'a> {
         while position < bytes.len() {
             let byte = bytes.get(position).copied().unwrap_or_default();
             if in_quote {
-                if byte == b'\r' || byte == b'\n' {
-                    in_quote = false;
-                    escaped = false;
-                } else if escaped {
+                if escaped {
                     escaped = false;
                 } else if byte == b'\\' {
                     escaped = true;

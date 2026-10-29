@@ -1,6 +1,6 @@
 # Locale language and Locale AST
 
-This document defines version 1 locale source syntax, its domain-specific AST, and the rules used to
+This document defines version 2 locale source syntax, its domain-specific AST, and the rules used to
 bind it to the schema. The public AST types are owned by `u18n-ast`; the independent, `no_std`
 parser in `u18n-locale` maps locale source directly into them and uses `u18n-locale-tag` for shared
 BCP 47 syntax checks. `u18n-ast` defines data types only and does not parse, validate, or lower
@@ -8,7 +8,8 @@ source. A locale file contains a catalog for one valid BCP 47 locale tag using t
 casing and may name one explicit fallback locale for message inheritance. Generated code also
 provides `LocaleTag::fallback` as a separate runtime catalog-selection helper based on CLDR 49
 main-component parent data. Patterns are parsed into tokens; localized text is never retained as an
-opaque message string for the runtime to parse.
+opaque message string for the runtime to parse. Locale files have no language-version field; the
+compiler release selects this version 2 grammar, with no version 1 compatibility mode.
 
 ## Source file format
 
@@ -25,8 +26,10 @@ message cart.total = "Total: {amount} {currency}";
 ```
 
 Whitespace and `//` line comments are allowed outside quoted message patterns. A line comment ends
-at CR, LF, or CRLF. Message patterns are double-quoted and can contain line breaks only through
-escapes. Declarations end with semicolons. A fallback target is a complete source locale tag,
+at CR, LF, or CRLF. Message patterns are double-quoted and may contain physical LF, CRLF, or CR
+line breaks. Each logical line break renders as LF; selector-layout line breaks are discarded,
+while line breaks and indentation in literal pattern regions are preserved. Declarations end with
+semicolons. A fallback target is a complete source locale tag,
 matched case-sensitively against the compilation input set; it is never inferred from BCP 47
 parents.
 
@@ -39,7 +42,7 @@ private-use subtags are lower-case; script subtags are title-case; alphabetic re
 upper-case; numeric region subtags are unchanged. Underscores are forbidden. The grammar follows
 [RFC 5646 §2.1](https://www.rfc-editor.org/rfc/rfc5646.html#section-2.1), including ordered
 language, extlang, script, region, variant, and private-use components. This accepts numeric region
-and variant subtags such as `es-419` and `de-CH-1901`. Version 1 rejects all extension sequences,
+and variant subtags such as `es-419` and `de-CH-1901`. Version 2 rejects all extension sequences,
 including Unicode (`u`), transformed (`t`), and other singleton extensions. Registered grandfathered
 tags and the RFC private-use sequence introduced by `x` remain accepted. The compiler additionally
 requires the complete tag to be registered as grandfathered or its language, extlang, script,
@@ -98,13 +101,14 @@ Within a quoted pattern or plural branch, the following escapes are recognized:
 | --- | --- |
 | `\\` | Backslash |
 | `\"` | Double quote |
-| `\n`, `\r`, `\t` | LF, CR, tab |
+| `\n`, `\r` | One logical line break rendered as LF |
+| `\t` | Tab |
 | `\{`, `\}` | Literal opening or closing brace |
 | `\#` | Literal `#` (needed inside plural branches) |
-| `\u{HEX}` | One Unicode scalar value, with 1–6 hexadecimal digits |
+| `\u{HEX}` | One Unicode scalar value, with 1–6 hexadecimal digits; U+000A and U+000D are logical line breaks |
 
-Invalid Unicode scalar values, malformed escapes, raw newlines in a quoted pattern, and unescaped
-structural braces in literal text are errors. A raw `#` is ordinary text except inside a plural
+Invalid Unicode scalar values, malformed escapes, and unescaped structural braces in literal text
+are errors. A raw `#` is ordinary text except inside a plural
 branch, where it inserts that plural selector's integer value. Escaped hashes are always literal
 text, whether written as `\#` or `\u{23}`.
 
@@ -115,7 +119,7 @@ outside quoted patterns, while preserving original source spans. `pattern` is th
 pattern; a `branch-pattern` is delimited by braces and may recursively contain interpolation or
 selectors. Each `bcp47-subtag` token is limited to 1–8 characters. The `locale-tag` production
 recognizes only the lexical candidate shape; the complete candidate must also pass RFC 5646 §2.1
-`Language-Tag` validation and the version 1 extension-sequence restriction above.
+`Language-Tag` validation and the version 2 extension-sequence restriction above.
 
 ```ebnf
 letter            = "A" … "Z" | "a" … "z" ;
@@ -124,8 +128,9 @@ hex-digit         = digit | "A" … "F" | "a" … "f" ;
 name              = (letter | "_") , { letter | digit | "_" } ;
 key-segment       = (letter | "_") , { letter | digit | "_" | "-" } ;
 message-key       = key-segment , { "." , key-segment } ;
-whitespace        = " " | "\t" | "\r" | "\n" ;
-pattern-space     = " " | "\t" ;
+line-break        = "\n" | "\r\n" | "\r" ;
+whitespace        = " " | "\t" | line-break ;
+pattern-space     = " " | "\t" | line-break ;
 backslash         = U+005C ;
 file              = whitespace* , locale-header , whitespace* , message-decl* , whitespace* , EOF ;
 locale-header     = "locale" , whitespace+ , locale-tag , [ whitespace+ , "fallback" , whitespace+ , locale-tag ] , whitespace* , ";" ;
@@ -137,8 +142,8 @@ message-decl      = "message" , whitespace+ , message-key , whitespace* , "=" , 
 
 pattern           = "\"" , top-level-part* , "\"" ;
 branch-pattern    = "{" , branch-part* , "}" ;
-top-level-part    = top-level-text | escape | interpolation | plural-expression | ordinal-expression | select-expression | format-expression ;
-branch-part       = branch-text | escape | interpolation | plural-expression | ordinal-expression | select-expression | format-expression | pound ;
+top-level-part    = top-level-text | line-break | escape | interpolation | plural-expression | ordinal-expression | select-expression | format-expression ;
+branch-part       = branch-text | line-break | escape | interpolation | plural-expression | ordinal-expression | select-expression | format-expression | pound ;
 interpolation     = "{" , pattern-space* , name , pattern-space* , "}" ;
 plural-expression = "{" , pattern-space* , name , pattern-space* , "," , pattern-space* , "plural" ,
                     pattern-space* , "," , pattern-space* , plural-branch ,
@@ -179,15 +184,17 @@ escape            = backslash , ( backslash | "\"" | "n" | "r" | "t" | "{" | "}"
                       [hex-digit] , [hex-digit] , "}" ) ;
 ```
 
-`top-level-text` is any Unicode scalar other than a quote, backslash, unescaped structural brace, or
-raw line break. `branch-text` has the same rule and also excludes `#`, which is parsed as `pound`.
+`top-level-text` is any Unicode scalar other than a quote, backslash, unescaped structural brace,
+CR, or LF. `branch-text` has the same rule and also excludes `#`, which is parsed as `pound`.
 Escapes are interpreted before the AST token is finalized, so escaped structural characters always
-remain literal text. The parser distinguishes interpolation and operations after reading the opening
-brace and identifier. Only `pattern-space` consumed around selector punctuation and options is
-syntax whitespace. Once a branch pattern opens, all its text, including leading and trailing spaces,
-is preserved exactly. Raw line breaks are invalid everywhere inside a quoted pattern, including
-selector syntax. At top level `#` is ordinary text. The `u{...}` escape must contain 1–6 hexadecimal
-digits and encode a valid Unicode scalar; surrogate values and values above U+10FFFF are rejected.
+remain literal text. `\n`, `\r`, `\u{A}`, and `\u{D}` each produce one `LineBreak` node. Other
+Unicode escapes produce their scalar value; U+0085, U+2028, and U+2029 are ordinary text. CRLF is
+one line break whose span covers both source bytes. The parser distinguishes interpolation and
+operations after reading the opening brace and identifier. `pattern-space` is discarded around
+selector punctuation, option syntax, branch labels, and selector closure. Once a branch pattern
+opens, its line breaks, leading and trailing spaces, and indentation are preserved exactly. At top
+level `#` is ordinary text. The `u{...}` escape must contain 1–6 hexadecimal digits and encode a
+valid Unicode scalar; surrogate values and values above U+10FFFF are rejected.
 Decimal and currency precision digits are limited to 0–9; `input` preserves the decimal's scale and
 `currency` delegates default precision to the formatter. The formatter receives rounding explicitly.
 Time zones use an escaped quoted ASCII identifier such as `\"America/New_York\"`.
@@ -237,6 +244,7 @@ Pattern {
 
 PatternPart =
     | Text { value: String, span: Span }
+    | LineBreak { span: Span }
     | Argument { name: Identifier, span: Span }
     | Plural { name: Identifier, kind: PluralKind, branches: Vec<PluralBranch>, span: Span }
     | Select { name: Identifier, branches: Vec<SelectBranch>, span: Span }
@@ -282,9 +290,10 @@ Span { file_id: FileId, start: u32, end: u32 }
 `source_tag` stores the spelling accepted by the locale-tag syntax parser; the compiler additionally
 checks source casing and IANA registration. It is not replaced with the locale chosen for CLDR rule
 lookup or runtime catalog selection. `fallback` stores the explicitly authored target tag and its
-source span; it is not canonicalized or inferred. `Text` nodes contain decoded literal text;
-adjacent literal text nodes may be coalesced only if their combined span remains a truthful source
-range. `Argument` identifies plain interpolation. `Plural` contains exact cases and typed category
+source span; it is not canonicalized or inferred. `Text` nodes contain decoded literal text and
+never contain CR or LF; `LineBreak` represents a hard break and always renders as LF. Escaped
+line-break spans cover the complete escape spelling, and raw CRLF spans cover both bytes. Adjacent
+literal text nodes may be coalesced only if their combined span remains a truthful source range. `Argument` identifies plain interpolation. `Plural` contains exact cases and typed category
 branches; its `kind` selects cardinal or ordinal rules. `Format` contains a typed formatting
 operation and its closed options. `Select` contains named string cases. `Pound` is retained as a
 distinct node rather than rewritten to an argument so its binding to the innermost plural or ordinal
@@ -292,16 +301,23 @@ selector remains explicit. Every node span is a half-open UTF-8 byte range into 
 escaped characters' spans cover their full source escape. Source files larger than `u32::MAX` bytes
 are rejected because their positions cannot be represented by `Span`.
 
+Version 2 adds `LineBreak` to the public `PatternPart` enum and `Instruction` enum. Downstream code
+that exhaustively matches either enum must handle the new variant, and generated catalogs must be
+rebuilt with the matching compiler and runtime. The `\r` escape now renders as LF along with `\n`
+and the Unicode line-break escapes.
+
 The AST is purpose-built for messages. It does not contain generic map/list/value nodes or infer
 structure later from strings. A malformed file is rejected; parser recovery may continue at the next
-top-level `message` boundary to report more than one syntax error.
+top-level `message` boundary after a closed declaration to report more than one syntax error. If a
+quoted pattern reaches EOF without closing, recovery stops at EOF rather than treating message-like
+content inside the quote as declarations.
 
 ## Cross-AST binding and type checks
 
 The locale AST is validated against the `SchemaAst` described in [Schema AST](schema-ast.md):
 
 1. The locale tag must be a valid BCP 47 tag using the recommended casing and contain no extension
-   sequence, as required by version 1. Cardinal rules must resolve for every locale in the pinned
+   sequence, as required by version 2. Cardinal rules must resolve for every locale in the pinned
    CLDR 49 data. The compiler also looks up ordinal rules for every locale; an unresolved ordinal
    rule set is an error if a pattern uses an ordinal selector. Validate the source spelling against
    the pinned IANA Language Subtag Registry snapshot, then preserve the complete source tag as the
@@ -389,7 +405,7 @@ for parent-locale data. The `plurals` component's map is used only for plural-ru
 unqualified main-component map is embedded in generated `LocaleTag::fallback` code for runtime
 catalog selection. The compiler verifies the cardinal-rule, ordinal-rule, alias, and supplemental
 files' SHA-256 digests, records them in generated metadata, and includes them in the catalog
-fingerprint. The output-format version is `1`. The
+fingerprint. The output-format version is `2`. The
 [CLDR 49 cardinal plural rules chart](https://unicode.org/cldr/charts/49/supplemental/language_plural_rules.html)
 provides human-readable cardinal examples. The vendored
 [IANA Language Subtag Registry snapshot](../../crates/u18n-compiler/data/iana-language-subtag-registry.txt)

@@ -13,7 +13,7 @@ those rules are compiled into runtime catalogs.
 Each locale source file declares one well-formed BCP 47 language tag using the recommended
 casing. A registered grandfathered tag is accepted as a whole. Otherwise, language, extlang,
 script, region, and variant subtags are checked against the vendored IANA registry snapshot.
-Version 1 rejects BCP 47 extension sequences. Private-use subtags are allowed, but do not affect
+Version 2 rejects BCP 47 extension sequences. Private-use subtags are allowed, but do not affect
 plural-rule lookup.
 
 The complete authored spelling is the locale's identity. It is retained in the generated locale
@@ -33,7 +33,7 @@ BCP 47 forms do not produce a parent-index key.
 
 `LocaleTag::from_str` accepts ASCII case variations of an included tag. A valid tag without an
 exact included catalog returns an unsupported-tag error. Both generated lookup methods validate
-BCP 47 structure and reject version 1 extension sequences. Runtime syntax validation does not
+BCP 47 structure and reject version 2 extension sequences. Runtime syntax validation does not
 check ordinary subtag registration, which remains a compile-time IANA check. Well-formed tags
 outside the semantic-code profile can still match an exact source tag. If they do not, fallback
 continues with structural truncation; representable candidates can use the numeric parent index
@@ -137,7 +137,7 @@ The IANA registry and CLDR files are versioned compiler inputs whose expected di
 checked at load time. Generated metadata and the catalog fingerprint record the CLDR version,
 IANA snapshot digest, cardinal-rule digest, ordinal-rule digest, alias digest,
 supplemental-data digest, and extension policy. The fingerprint also includes schema and locale
-source, generation settings, and output-format version (`1`).
+source, generation settings, and output-format version (`2`).
 
 The relevant pinned inputs are the [IANA Language Subtag Registry
 snapshot](../crates/u18n-compiler/data/iana-language-subtag-registry.txt), CLDR 49 [cardinal

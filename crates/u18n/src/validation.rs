@@ -261,7 +261,7 @@ impl<'catalog> CatalogValidator<'catalog> {
                     Instruction::Format { format_index } => {
                         Self::format_node(self.store, format_index)?;
                     }
-                    Instruction::Argument { .. } | Instruction::Pound => {}
+                    Instruction::Argument { .. } | Instruction::LineBreak | Instruction::Pound => {}
                 }
             }
         }
@@ -385,7 +385,7 @@ impl<'catalog> CatalogValidator<'catalog> {
                     Instruction::Format { format_index } => {
                         Self::format_node(self.store, format_index)?;
                     }
-                    Instruction::Argument { .. } | Instruction::Pound => {}
+                    Instruction::Argument { .. } | Instruction::LineBreak | Instruction::Pound => {}
                 }
             }
         }
@@ -487,6 +487,7 @@ impl<'catalog> CatalogValidator<'catalog> {
                     return Err(RenderError::InvalidCatalog);
                 }
                 Instruction::Pound => {}
+                Instruction::LineBreak => {}
             }
         }
         Ok(())

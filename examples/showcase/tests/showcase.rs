@@ -11,9 +11,9 @@ use u18n::{
     OrdinalCount, PluralCount, PluralDecimal, RenderError, SharedProgramStore,
 };
 use u18n_showcase::{
-    FINAL_FALLBACK_LOCALE, LocaleTag, catalogs, clear_current_locale, m_app_stitle,
-    m_cart_sdecimal_ucount, m_cart_sitems, m_cart_stotal, m_cart_styped_utotal, m_event_swhen,
-    m_rank_sposition, m_report_svalues, set_current_locale, t,
+    FINAL_FALLBACK_LOCALE, LocaleTag, catalogs, clear_current_locale, m_app_smultiline,
+    m_app_stitle, m_cart_sdecimal_ucount, m_cart_sitems, m_cart_stotal, m_cart_styped_utotal,
+    m_event_swhen, m_rank_sposition, m_report_svalues, set_current_locale, t,
 };
 
 struct ExampleFormatter;
@@ -163,6 +163,25 @@ fn key_based_translation_uses_atomic_selection_and_explicit_overrides() {
 }
 
 #[test]
+fn multiline_patterns_keep_literal_breaks_and_ignore_selector_layout_breaks() {
+    let english = &catalogs::locale_en::LOCALE;
+    let french = &catalogs::locale_fr::LOCALE;
+
+    assert_eq!(
+        m_app_smultiline!(english, PluralCount::new(2)),
+        Ok(String::from("Cart:\n2 items\n    in the cart"))
+    );
+    assert_eq!(
+        m_app_smultiline!(english, PluralCount::new(1)),
+        Ok(String::from("Cart:\n1 item\n    in the cart"))
+    );
+    assert_eq!(
+        m_app_smultiline!(french, PluralCount::new(2)),
+        Ok(String::from("Panier :\n2 articles\n    dans le panier"))
+    );
+}
+
+#[test]
 fn key_dispatch_evaluates_headers_and_named_values_once_in_written_order() {
     let trace = RefCell::new(Vec::new());
     let formatter = ExampleFormatter;
@@ -235,7 +254,7 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
     ] {
         let keyed = m_cart_sitems!(english_locale, PluralCount::new(count), "Ada", "other");
         let dynamic = english_catalog.render(
-            2,
+            3,
             &[
                 ArgumentValue::PluralCount(PluralCount::new(count)),
                 ArgumentValue::String("Ada"),
@@ -275,7 +294,7 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
     ] {
         let value = PluralDecimal::new(case.coefficient, case.scale).expect("valid plural decimal");
         let keyed = m_cart_sdecimal_ucount!(english_locale, value);
-        let dynamic = english_catalog.render(1, &[ArgumentValue::PluralDecimal(value)]);
+        let dynamic = english_catalog.render(2, &[ArgumentValue::PluralDecimal(value)]);
         assert_eq!(keyed, dynamic);
         assert_eq!(dynamic, Ok(String::from(case.expected)));
     }
@@ -294,7 +313,7 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
     ] {
         let keyed = m_rank_sposition!(english_locale, OrdinalCount::new(rank));
         let dynamic =
-            english_catalog.render(7, &[ArgumentValue::OrdinalCount(OrdinalCount::new(rank))]);
+            english_catalog.render(8, &[ArgumentValue::OrdinalCount(OrdinalCount::new(rank))]);
         assert_eq!(keyed, dynamic);
         assert_eq!(dynamic, Ok(String::from(expected)));
     }
@@ -422,14 +441,14 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     let french = &catalogs::locale_fr::CATALOG;
     let french_locale = &catalogs::locale_fr::LOCALE;
 
-    assert_eq!(m_app_stitle!(english_locale), english.render(0, &[]));
+    assert_eq!(m_app_stitle!(english_locale), english.render(1, &[]));
     assert_eq!(
         m_cart_sdecimal_ucount!(
             french_locale,
             PluralDecimal::new(200, 2).expect("valid plural decimal")
         ),
         french.render(
-            1,
+            2,
             &[ArgumentValue::PluralDecimal(
                 PluralDecimal::new(200, 2).expect("valid plural decimal")
             )]
@@ -438,7 +457,7 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     assert_eq!(
         m_cart_sitems!(spanish_locale, PluralCount::new(2), "Ada", "female"),
         spanish.render(
-            2,
+            3,
             &[
                 ArgumentValue::PluralCount(PluralCount::new(2)),
                 ArgumentValue::String("Ada"),
@@ -450,7 +469,7 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     assert_eq!(
         m_cart_stotal!(spanish_locale, amount, "USD"),
         spanish.render(
-            3,
+            4,
             &[ArgumentValue::Number(&amount), ArgumentValue::String("USD"),]
         )
     );
@@ -462,7 +481,7 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
         m_cart_styped_utotal!(spanish_locale, &formatter, amount, charge),
         spanish.render_with(
             &formatter,
-            4,
+            5,
             &[ArgumentValue::Decimal(amount), ArgumentValue::Money(charge),]
         )
     );
@@ -476,7 +495,7 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
         ),
         french.render_with(
             &formatter,
-            6,
+            7,
             &[
                 ArgumentValue::Date(CivilDate::new(2026, 7, 4).expect("valid date")),
                 ArgumentValue::Time(CivilTime::new(9, 30, 0, 0).expect("valid time")),
@@ -486,7 +505,7 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     );
     assert_eq!(
         m_rank_sposition!(english_locale, OrdinalCount::new(22)),
-        english.render(7, &[ArgumentValue::OrdinalCount(OrdinalCount::new(22))])
+        english.render(8, &[ArgumentValue::OrdinalCount(OrdinalCount::new(22))])
     );
 }
 
@@ -506,11 +525,11 @@ fn keyed_and_dynamic_streaming_report_the_same_sink_error() {
     let mut dynamic_output = RejectWrites;
 
     assert_eq!(
-        catalogs::__MESSAGE_DATA_0.render_to(locale, &[], &mut keyed_output),
-        catalog.render_to(0, &[], &mut dynamic_output)
+        catalogs::__MESSAGE_DATA_1.render_to(locale, &[], &mut keyed_output),
+        catalog.render_to(1, &[], &mut dynamic_output)
     );
     assert_eq!(
-        catalogs::__MESSAGE_DATA_0.render_to(locale, &[], &mut RejectWrites),
+        catalogs::__MESSAGE_DATA_1.render_to(locale, &[], &mut RejectWrites),
         Err(RenderError::WriteFailed)
     );
 }

@@ -33,7 +33,7 @@ impl Fingerprint {
             generation,
         } = input;
         let mut hash = Sha256::new();
-        hash.update(b"u18n-catalog-input-v1\0");
+        hash.update(b"u18n-catalog-input-v2\0");
         Self::field(&mut hash, "schema", schema.as_bytes());
         let mut ordered = locales
             .iter()
@@ -49,7 +49,7 @@ impl Fingerprint {
             Self::field(&mut hash, "locale-tag", tag.as_bytes());
             Self::field(&mut hash, "locale-source", source);
         }
-        Self::field(&mut hash, "output-format-version", b"1");
+        Self::field(&mut hash, "output-format-version", b"2");
         Self::field(&mut hash, "cldr-version", b"49");
         Self::field(
             &mut hash,

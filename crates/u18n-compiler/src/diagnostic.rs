@@ -83,22 +83,11 @@ impl Diagnostic {
 
     fn render_parts(path: &str, source: &str, start: usize, end: usize, message: &str) -> String {
         let bounded_start = start.min(source.len());
-        let line_start = source
-            .as_bytes()
-            .get(..bounded_start)
-            .and_then(|prefix| prefix.iter().rposition(|byte| *byte == b'\n'))
-            .map_or(0, |position| position + 1);
-        let line = source.as_bytes().get(..bounded_start).map_or(1, |prefix| {
-            prefix.iter().filter(|byte| **byte == b'\n').count() + 1
-        });
+        let (line, line_start) = Self::line_position(source.as_bytes(), bounded_start);
         let column = source
             .get(line_start..bounded_start)
             .map_or(1, |prefix| prefix.chars().count() + 1);
-        let line_end = source
-            .as_bytes()
-            .get(bounded_start..)
-            .and_then(|suffix| suffix.iter().position(|byte| *byte == b'\n'))
-            .map_or(source.len(), |position| bounded_start + position);
+        let line_end = Self::line_end(source.as_bytes(), bounded_start);
         let excerpt = source.get(line_start..line_end).unwrap_or("");
         let width = source
             .get(bounded_start..end.min(source.len()))
@@ -108,5 +97,58 @@ impl Diagnostic {
             " ".repeat(column.saturating_sub(1)),
             "^".repeat(width)
         )
+    }
+
+    fn line_position(bytes: &[u8], position: usize) -> (usize, usize) {
+        let mut line = 1usize;
+        let mut line_start = 0usize;
+        let mut cursor = 0usize;
+        while cursor < position {
+            match bytes.get(cursor).copied() {
+                Some(b'\r') if bytes.get(cursor + 1) == Some(&b'\n') => {
+                    cursor += 2;
+                    line += 1;
+                    line_start = cursor;
+                }
+                Some(b'\r' | b'\n') => {
+                    cursor += 1;
+                    line += 1;
+                    line_start = cursor;
+                }
+                Some(_) => cursor += 1,
+                None => break,
+            }
+        }
+        (line, line_start)
+    }
+
+    fn line_end(bytes: &[u8], position: usize) -> usize {
+        bytes
+            .get(position..)
+            .and_then(|suffix| {
+                suffix
+                    .iter()
+                    .position(|byte| *byte == b'\r' || *byte == b'\n')
+            })
+            .map_or(bytes.len(), |offset| position + offset)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Diagnostic;
+
+    #[test]
+    fn reports_the_same_line_and_column_for_all_source_line_endings() {
+        for source in [
+            "header\nmessage x",
+            "header\r\nmessage x",
+            "header\rmessage x",
+        ] {
+            let start = source.find('x').unwrap_or_default();
+            let diagnostic = Diagnostic::at("locale.u18n", source, start, start + 1, "bad".into());
+
+            assert!(diagnostic.render().starts_with("locale.u18n:2:9: bad"));
+        }
     }
 }

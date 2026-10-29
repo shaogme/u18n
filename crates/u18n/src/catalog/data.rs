@@ -9,6 +9,8 @@ use crate::{
 pub enum Instruction {
     /// Append `length` bytes from the pool starting at `offset`.
     Text { offset: u32, length: u32 },
+    /// Append one logical line break as U+000A.
+    LineBreak,
     /// Format the argument at its schema-defined slot.
     Argument { argument_index: u32 },
     /// Evaluate a plural node by index.

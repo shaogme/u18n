@@ -10,10 +10,10 @@ Add the runtime to your application and the compiler as a build dependency:
 
 ```toml
 [dependencies]
-u18n = "0.1.3"
+u18n = "0.2.0"
 
 [build-dependencies]
-u18n-compiler = "0.1.3"
+u18n-compiler = "0.2.0"
 ```
 
 Create these files in the package root:
@@ -40,6 +40,7 @@ schema 1;
 message app.title();
 message cart.items(count: plural_count);
 message cart.hint();
+message cart.multiline();
 ```
 
 `plural_count` is an unsigned integer with plural meaning. Use `number` for a value that should
@@ -56,7 +57,13 @@ locale en;
 message app.title = "Small Cart";
 message cart.items = "{count, plural, =0 {Your cart is empty.} one {Your cart has # item.} other {Your cart has # items.}}";
 message cart.hint = "Add a product to get started.";
+message cart.multiline = "First line
+Second line";
 ```
+
+Physical LF, CRLF, and CR line breaks inside quoted patterns render as LF. Literal line breaks and
+indentation are preserved inside outer text and branch patterns; selector-layout whitespace is
+discarded.
 
 `locales/es-419.u18n`:
 

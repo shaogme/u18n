@@ -81,7 +81,7 @@ the showcase does. Compilation proceeds through these stages:
    packed key: the child semantic code shifted left three bits, with the fixed private
    `ParentLocale` discriminant in the low three bits. The enum supplies the canonical parent tag
    after lookup. The `t!` dispatcher is emitted alongside them. The fingerprint hashes source inputs,
-   generation options, output-format version (`1`), and all pinned locale-data digests, including
+   generation options, output-format version (`2`), and all pinned locale-data digests, including
    cardinal rules and aliases used for plural resolution and supplemental data used by runtime
    locale fallback.
 
@@ -153,6 +153,11 @@ delegates display to the caller's `Display` implementation, and decimal, money, 
 instant values use typed formatting operations. Decimal plural inputs preserve visible scale for
 CLDR operands. The runtime itself performs no locale-file I/O, dynamic catalog registration, or
 pattern parsing.
+
+The locale AST represents physical and escaped line breaks as `PatternPart::LineBreak`. Linking
+preserves that node, and lowering emits `Instruction::LineBreak`; the runtime writes one LF through
+the caller's output sink. Line breaks do not enter the UTF-8 text pools, and the runtime never
+parses locale source.
 
 ## CLI and translator tooling
 

@@ -84,6 +84,7 @@ fn locale_ast_keeps_plural_tokens_and_recursive_patterns() {
                         value: String::from("You have "),
                         span: span(33, 42),
                     },
+                    PatternPart::LineBreak { span: span(42, 43) },
                     PatternPart::Plural {
                         name: identifier("count", 44, 49),
                         kind: PluralKind::Cardinal,
@@ -149,6 +150,7 @@ fn locale_ast_keeps_plural_tokens_and_recursive_patterns() {
                 parts.as_slice(),
                 [
                     PatternPart::Text { .. },
+                    PatternPart::LineBreak { .. },
                     PatternPart::Plural { branches, .. }
                 ]
                 if matches!(

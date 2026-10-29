@@ -93,6 +93,9 @@ mod linked_parts {
             value: String,
             span: Span,
         },
+        LineBreak {
+            span: Span,
+        },
         Argument {
             slot: u32,
             span: Span,

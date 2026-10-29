@@ -1,6 +1,7 @@
 schema 1;
 
 message app.title();
+message app.multiline(count: plural_count);
 message cart.items(count: plural_count, owner: string, gender: string);
 message cart.decimal_count(value: plural_decimal);
 message cart.total(amount: number, currency: string);

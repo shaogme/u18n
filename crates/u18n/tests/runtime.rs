@@ -35,6 +35,10 @@ struct PartialFailureSink {
     value: String,
 }
 
+struct LineBreakFailureSink {
+    value: String,
+}
+
 static KEYED_LOCALE_PROGRAMS: [LocaleProgram; 1] = [LocaleProgram {
     locale_tag: "en",
     program_id: 0,
@@ -69,6 +73,16 @@ impl Write for PartialFailureSink {
     }
 }
 
+impl Write for LineBreakFailureSink {
+    fn write_str(&mut self, value: &str) -> FmtResult {
+        if value == "\n" {
+            return Err(FmtError);
+        }
+        self.value.push_str(value);
+        Ok(())
+    }
+}
+
 static ONE_RULE_SET: [RuleSet; 1] = [RuleSet {
     kind: PluralKind::Cardinal,
     rules: &[PluralRule {
@@ -93,6 +107,124 @@ static ONE_RULE_SET: [RuleSet; 1] = [RuleSet {
         }],
     }],
 }];
+static LINE_BREAK_SIGNATURES: [MessageSignature; 1] = [MessageSignature { argument_count: 2 }];
+static LINE_BREAK_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
+    instruction_start: 0,
+    instruction_end: 3,
+}];
+static LINE_BREAK_INSTRUCTIONS: [Instruction; 13] = [
+    Instruction::Text {
+        offset: 27,
+        length: 3,
+    },
+    Instruction::LineBreak,
+    Instruction::Plural { plural_index: 0 },
+    Instruction::Text {
+        offset: 0,
+        length: 4,
+    },
+    Instruction::LineBreak,
+    Instruction::Select { select_index: 0 },
+    Instruction::Text {
+        offset: 4,
+        length: 6,
+    },
+    Instruction::LineBreak,
+    Instruction::Select { select_index: 0 },
+    Instruction::Text {
+        offset: 10,
+        length: 5,
+    },
+    Instruction::LineBreak,
+    Instruction::Text {
+        offset: 15,
+        length: 1,
+    },
+    Instruction::LineBreak,
+];
+static LINE_BREAK_PLURALS: [PluralNode; 1] = [PluralNode {
+    argument_index: 0,
+    kind: PluralKind::Cardinal,
+    rule_set_index: 0,
+    branch_start: 0,
+    branch_end: 2,
+}];
+static LINE_BREAK_SELECTS: [SelectNode; 1] = [SelectNode {
+    argument_index: 1,
+    branch_start: 0,
+    branch_end: 2,
+}];
+static LINE_BREAK_PLURAL_BRANCHES: [PluralBranchRecord; 2] = [
+    PluralBranchRecord {
+        selector: PluralSelector::Category(PluralCategory::One),
+        instruction_start: 3,
+        instruction_end: 6,
+    },
+    PluralBranchRecord {
+        selector: PluralSelector::Category(PluralCategory::Other),
+        instruction_start: 6,
+        instruction_end: 9,
+    },
+];
+static LINE_BREAK_SELECT_BRANCHES: [SelectBranchRecord; 2] = [
+    SelectBranchRecord {
+        value_offset: 21,
+        value_length: 6,
+        instruction_start: 9,
+        instruction_end: 11,
+    },
+    SelectBranchRecord {
+        value_offset: 16,
+        value_length: 5,
+        instruction_start: 11,
+        instruction_end: 13,
+    },
+];
+static LINE_BREAK_TEXT_POOL: &str = "one:other:womanxotherfemaletop";
+
+fn line_break_catalog_data() -> CatalogData {
+    CatalogData {
+        locale_tag: "en",
+        fallback: None,
+        bindings: &[MessageBinding {
+            message_id: 0,
+            program_id: 0,
+        }],
+        shared_store: shared_store(SharedProgramStore {
+            text_pool: LINE_BREAK_TEXT_POOL,
+            message_signatures: &LINE_BREAK_SIGNATURES,
+            programs: &LINE_BREAK_PROGRAMS,
+            instructions: &LINE_BREAK_INSTRUCTIONS,
+            plurals: &LINE_BREAK_PLURALS,
+            selects: &LINE_BREAK_SELECTS,
+            branches: &LINE_BREAK_PLURAL_BRANCHES,
+            select_branches: &LINE_BREAK_SELECT_BRANCHES,
+            formats: &[],
+            rule_sets: &ONE_RULE_SET,
+        }),
+    }
+}
+
+fn line_break_catalog() -> Catalog {
+    Catalog::new_trusted(line_break_catalog_data())
+}
+
+fn line_break_message() -> MessageData {
+    MessageData::new_trusted(MessageShardData {
+        argument_count: 2,
+        locale_programs: &KEYED_LOCALE_PROGRAMS,
+        text_pool: LINE_BREAK_TEXT_POOL,
+        programs: &LINE_BREAK_PROGRAMS,
+        instructions: &LINE_BREAK_INSTRUCTIONS,
+        plurals: &LINE_BREAK_PLURALS,
+        selects: &LINE_BREAK_SELECTS,
+        branches: &LINE_BREAK_PLURAL_BRANCHES,
+        select_branches: &LINE_BREAK_SELECT_BRANCHES,
+        formats: &[],
+        rule_sets: &ONE_RULE_SET,
+    })
+}
+
 static DECIMAL_RULE_SET: [RuleSet; 1] = [RuleSet {
     kind: PluralKind::Cardinal,
     rules: &[
@@ -695,6 +827,71 @@ fn renders_text_and_schema_order_arguments() {
         catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(17))]),
         Ok(String::from("Hello, 17!"))
     );
+}
+
+#[test]
+fn line_break_instructions_render_identically_in_keyed_and_dynamic_paths() {
+    assert!(Catalog::try_new(line_break_catalog_data()).is_ok());
+    let catalog = line_break_catalog();
+    let message = line_break_message();
+    let locale = Locale::new_trusted(0, "en");
+    let singular_arguments = [
+        ArgumentValue::PluralCount(PluralCount::new(1)),
+        ArgumentValue::String("female"),
+    ];
+    let plural_arguments = [
+        ArgumentValue::PluralCount(PluralCount::new(2)),
+        ArgumentValue::String("other"),
+    ];
+    let singular = "top\none:\nwoman\n";
+    let plural = "top\nother:\nx\n";
+
+    assert_eq!(
+        catalog.render(0, &singular_arguments),
+        Ok(String::from(singular))
+    );
+    assert_eq!(
+        message.render(&locale, &singular_arguments),
+        Ok(String::from(singular))
+    );
+    assert_eq!(
+        catalog.render(0, &plural_arguments),
+        Ok(String::from(plural))
+    );
+    assert_eq!(
+        message.render(&locale, &plural_arguments),
+        Ok(String::from(plural))
+    );
+
+    let mut dynamic_output = String::new();
+    assert_eq!(
+        catalog.render_to(0, &singular_arguments, &mut dynamic_output),
+        Ok(())
+    );
+    let mut keyed_output = String::new();
+    assert_eq!(
+        message.render_to(&locale, &singular_arguments, &mut keyed_output),
+        Ok(())
+    );
+    assert_eq!(dynamic_output, singular);
+    assert_eq!(keyed_output, singular);
+
+    let mut dynamic_failure = LineBreakFailureSink {
+        value: String::new(),
+    };
+    assert_eq!(
+        catalog.render_to(0, &singular_arguments, &mut dynamic_failure),
+        Err(RenderError::WriteFailed)
+    );
+    let mut keyed_failure = LineBreakFailureSink {
+        value: String::new(),
+    };
+    assert_eq!(
+        message.render_to(&locale, &singular_arguments, &mut keyed_failure),
+        Err(RenderError::WriteFailed)
+    );
+    assert_eq!(dynamic_failure.value, "top");
+    assert_eq!(keyed_failure.value, "top");
 }
 
 #[test]

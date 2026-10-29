@@ -36,7 +36,7 @@ CLDR parent index stores one numeric `u64` key per child. Bits 3–55 hold the b
 language, script, and region code; bits 0–2 hold the matching fixed private `ParentLocale`
 discriminant. Rows sort by child code, and the enum supplies the canonical parent tag after lookup.
 `LocaleTag::from_str` accepts any
-ASCII casing of an included source tag. It validates BCP 47 structure and version 1's extension
+ASCII casing of an included source tag. It validates BCP 47 structure and version 2's extension
 policy, but does not carry the IANA registry for runtime registration checks. A well-formed tag
 without an exact included catalog returns an unsupported-tag error. To map a requested tag to an
 included catalog, use `LocaleTag::fallback`:
@@ -181,6 +181,28 @@ always a valid plural. Category names are grammatical rules, not fixed number la
 `plural_decimal` preserves trailing zeroes, so `1`, `1.0`, and `1.00` can have different CLDR
 operands and remain distinct when rendered. Ordinal selectors accept `ordinal_count` only.
 Select values match case-sensitively and require an `other` branch.
+
+Patterns can span source lines. Line breaks and indentation in literal text and branch patterns are
+preserved (with CRLF and CR normalized to LF); newlines used to lay out selector syntax are
+discarded.
+
+In the schema:
+
+```text
+message cart.summary(count: plural_count);
+```
+
+In a locale catalog:
+
+```text
+message cart.summary = "Cart:
+{count, plural,
+    one {# item
+    in the cart}
+    other {# items
+    in the cart}
+}";
+```
 
 Inside a plural or ordinal branch, `#` renders that selector's value without grouping. A nested
 plural or ordinal makes its own value active; nested `select` branches keep the enclosing value

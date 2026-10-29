@@ -65,6 +65,7 @@ impl PatternLinker<'_> {
                     value: value.clone(),
                     span: *span,
                 },
+                PatternPart::LineBreak { span } => LinkedPatternPart::LineBreak { span: *span },
                 PatternPart::Argument { name, span } => {
                     let slot = self.bind_plain(name);
                     LinkedPatternPart::Argument { slot, span: *span }

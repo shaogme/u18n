@@ -57,7 +57,7 @@ compiler, where they can be reported with related declaration spans.
 shared borrowed BCP 47 parser, grandfathered-tag set, private-use-aware truncation, and the
 general-purpose 16-byte `ParsedTag::packed_key` API. The separate semantic encoder maps only a 2-
 or 3-letter language with optional 4-letter script and optional 2-letter or 3-digit region into a
-`u64`. It checks syntax and the version 1 extension
+`u64`. It checks syntax and the version 2 extension
 policy without IANA registration or heap allocation. The locale parser and checked runtime
 catalog constructor use the same validation behavior. Generated source-locale lookup remains a
 case-insensitive string index; each generated CLDR main-parent row stores a single sorted `u64`
@@ -74,8 +74,9 @@ recommended-casing checks belong to the compiler, where the pinned registry is a
 [`crates/u18n-locale/src/parser/pattern.rs`](../crates/u18n-locale/src/parser/pattern.rs) parses
 each quoted pattern into recursive typed nodes. It decodes escapes while retaining source spans,
 parses interpolation, plural, ordinal, select, and format expressions, and enforces a maximum of
-32 nested selectors. Literal message text is therefore ready for runtime rendering without a
-runtime parser.
+32 nested selectors. Physical and escaped line breaks become dedicated AST nodes; selector
+whitespace accepts source line breaks while branch text preserves them. Literal message text is
+therefore ready for runtime rendering without a runtime parser.
 
 Like the schema parser, `LocaleParser::parse_collect` can recover at later message declarations.
 Its output also retains a candidate locale tag when the header tag was lexically complete,
@@ -121,7 +122,7 @@ affect plural-rule lookup; the separate main-component parent map drives generat
 catalog selection. The source locale spelling remains the catalog identity.
 
 The fingerprint orders locale inputs by source tag. It includes source contents, generation
-settings, output-format version (`1`), CLDR version, IANA registry digest, CLDR cardinal-rule,
+settings, output-format version (`2`), CLDR version, IANA registry digest, CLDR cardinal-rule,
 ordinal-rule, alias, and supplemental-data digests, and the locale extension policy. The
 cardinal-rule and alias digests identify inputs used for plural resolution; the supplemental-data
 digest identifies the main-component parent mappings embedded in generated
@@ -160,6 +161,9 @@ lookup. Both provide borrowed table views to one evaluator that appends text and
 selects branches, tracks the active plural value for `#`, and calls the caller's `Formatter`. A
 formatter receives the selected locale's authored tag. The runtime supplies no locale-specific
 number, currency, date, or time formatting policy.
+
+`LineBreak` is lowered to a dedicated `Instruction::LineBreak` with no text-pool reference. The
+shared evaluator writes one LF through the caller's sink for both keyed and dynamic rendering.
 
 [`crates/u18n/src/plural.rs`](../crates/u18n/src/plural.rs) evaluates compiled cardinal and
 ordinal rules against exact decimal operands.

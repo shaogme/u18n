@@ -350,6 +350,10 @@ impl Renderer {
                 Instruction::Text { offset, length } => {
                     Self::append_text(output, context.tables.text_pool, *offset, *length)?;
                 }
+                Instruction::LineBreak => {
+                    let result = output.write_str("\n");
+                    output.result(result)?;
+                }
                 Instruction::Argument { argument_index } => {
                     Self::append_argument(output, context, *argument_index)?;
                 }

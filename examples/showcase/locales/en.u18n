@@ -1,6 +1,13 @@
 locale en;
 
 message app.title = "Tiny Cart";
+message app.multiline = "Cart:
+{count, plural,
+    one {# item
+    in the cart}
+    other {# items
+    in the cart}
+}";
 message cart.items = "{owner} has {count, plural, =0 {no items} one {# item} other {# items}} in the cart. {gender, select, female {She has it covered.} male {He has it covered.} other {They have it covered.}}";
 message cart.decimal_count = "{value, plural, =2 {exact #} one {# item} other {# items}}";
 message cart.total = "Total: {amount} {currency}";

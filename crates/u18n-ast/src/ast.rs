@@ -230,11 +230,15 @@ mod pattern {
             pub span: Span,
         }
 
-        /// A literal, interpolation, selector, plural expression, or active count marker.
+        /// A literal, hard line break, interpolation, selector, or active count marker.
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum PatternPart {
             Text {
                 value: String,
+                span: Span,
+            },
+            /// A logical line break rendered as U+000A.
+            LineBreak {
                 span: Span,
             },
             Argument {

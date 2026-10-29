@@ -379,6 +379,7 @@ impl CodeGenerator {
                     output.push('T');
                     Self::push_atom(output, value);
                 }
+                LinkedPatternPart::LineBreak { .. } => output.push('B'),
                 LinkedPatternPart::Argument { slot, .. } => {
                     output.push('A');
                     Self::push_number(output, *slot);
@@ -533,6 +534,7 @@ impl CodeGenerator {
                     }
                 }
                 LinkedPatternPart::Text { .. }
+                | LinkedPatternPart::LineBreak { .. }
                 | LinkedPatternPart::Argument { .. }
                 | LinkedPatternPart::Format { .. }
                 | LinkedPatternPart::Pound { .. } => {}
@@ -575,6 +577,7 @@ impl CodeGenerator {
                     }
                 }
                 LinkedPatternPart::Argument { .. }
+                | LinkedPatternPart::LineBreak { .. }
                 | LinkedPatternPart::Format { .. }
                 | LinkedPatternPart::Pound { .. } => {}
             }
@@ -591,6 +594,7 @@ impl CodeGenerator {
                 .iter()
                 .any(|branch| Self::has_format(&branch.pattern)),
             LinkedPatternPart::Text { .. }
+            | LinkedPatternPart::LineBreak { .. }
             | LinkedPatternPart::Argument { .. }
             | LinkedPatternPart::Pound { .. } => false,
         })

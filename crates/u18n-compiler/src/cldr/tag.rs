@@ -357,7 +357,7 @@ impl TagValidator {
                 position = subtags.len();
             } else if next.len() == 1 {
                 return Err(format!(
-                    "BCP 47 extension sequence `{next}` is rejected by locale format version 1"
+                    "BCP 47 extension sequence `{next}` is rejected by locale format version 2"
                 ));
             } else {
                 return Err(format!("subtag `{next}` is out of order or malformed"));

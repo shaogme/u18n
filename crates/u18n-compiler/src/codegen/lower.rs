@@ -25,6 +25,7 @@ pub(super) struct MessageBindingData {
 
 pub(super) enum InstructionData {
     Text { offset: u32, length: u32 },
+    LineBreak,
     Argument { index: u32 },
     Plural { index: u32 },
     Select { index: u32 },
@@ -166,6 +167,10 @@ impl<'ast> LowerBuilder<'ast> {
                         self.instructions
                             .push(InstructionData::Text { offset, length });
                     }
+                }
+                LinkedPatternPart::LineBreak { span } => {
+                    let _source_span = span;
+                    self.instructions.push(InstructionData::LineBreak);
                 }
                 LinkedPatternPart::Argument { slot, span } => {
                     let _source_span = span;

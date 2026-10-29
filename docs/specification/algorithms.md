@@ -39,8 +39,10 @@ bytes is rejected before a span is built.
 The schema parser recognizes the version header, message declarations, ordered parameter signatures,
 and documentation comments. The locale parser recognizes one header and recursively builds pattern
 nodes. Syntax whitespace and comments are skipped only where the respective grammar permits them;
-pattern text is decoded into `Text` parts while escapes are interpreted. Plural, ordinal, and select
-nesting is limited to 32 along each branch path.
+pattern text is decoded into `Text` parts while escapes are interpreted. Physical and escaped
+line breaks become source-spanned `LineBreak` parts; CRLF is one logical break. Selector syntax
+whitespace may span lines, while line breaks inside branch patterns remain message content. Plural,
+ordinal, and select nesting is limited to 32 along each branch path.
 
 Parsing does not establish cross-file meaning. The compiler performs key uniqueness, schema binding,
 type checking, tag registration, category completeness, and fallback checks after parsing.
@@ -68,7 +70,7 @@ registration and recommended source casing.
 
 For each distinct locale input, the compiler validates its complete tag against BCP 47 syntax and
 the pinned IANA registry. It checks registered language, extlang, script, region, and variant
-subtags; extlang and variant prefixes; recommended casing; duplicate variants; and the version 1
+subtags; extlang and variant prefixes; recommended casing; duplicate variants; and the version 2
 rule rejecting extension sequences. Registered grandfathered tags and private-use sequences are
 handled by their specific BCP 47 cases. Private-use subtags do not require registry membership.
 
@@ -199,6 +201,7 @@ The lowerer converts linked pattern parts as follows:
 | Linked part | Lowered representation |
 | --- | --- |
 | Text | `Text` instruction with a byte range in the shared pool |
+| LineBreak | `LineBreak` instruction that appends one LF |
 | Argument | `Argument` instruction with a schema slot |
 | Plural / ordinal | `Plural` instruction referring to a plural node and branch range |
 | Select | `Select` instruction referring to a select node and branch range |
@@ -267,7 +270,7 @@ locale; the generated selector uses pointer-width atomics. `current_catalog()` a
 `FINAL_FALLBACK_CATALOG` remain dynamic-ID conveniences.
 
 The input SHA-256 is length-delimited and includes the raw schema source, raw locale sources ordered
-by source tag, output-format version (`1`), CLDR version, IANA registry digest, cardinal-rule
+by source tag, output-format version (`2`), CLDR version, IANA registry digest, cardinal-rule
 digest, ordinal-rule digest, alias digest, supplemental-data digest, extension policy,
 atomic-selection setting, final fallback tag, and string-pool limit. Cardinal-rule and alias
 digests identify inputs used for plural resolution; the supplemental digest identifies the parent
@@ -287,6 +290,7 @@ validates generated tables, and `Catalog::try_new` checks caller-built dynamic d
 construction:
 
 * Text appends a validated slice from the owning table set's pool.
+* LineBreak appends one LF through the caller's output sink.
 * Argument writes a string, caller `Display` value, count/rank digits, or the ungrouped plural
   decimal. Typed format-only values cannot be written as plain arguments.
 * Select compares the string argument exactly against case names and renders the matching branch, or

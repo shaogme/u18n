@@ -67,6 +67,11 @@ pub(super) struct PatternParser<'a> {
     position: usize,
 }
 
+enum EscapeValue {
+    Text(char),
+    LineBreak,
+}
+
 impl<'a> PatternParser<'a> {
     pub(super) fn new(source: &'a str, file_id: FileId, position: usize) -> Self {
         Self {
@@ -133,11 +138,13 @@ impl<'a> PatternParser<'a> {
                 });
             }
             if self.peek_byte(b'\r') || self.peek_byte(b'\n') {
-                return Err(self.error(
-                    self.position,
-                    self.position + 1,
-                    "raw line breaks are not allowed in message patterns",
-                ));
+                let start = self.position;
+                self.flush_text(&mut parts, &mut text_value, &mut text_start, start);
+                self.consume_line_break();
+                parts.push(PatternPart::LineBreak {
+                    span: self.span(start, self.position),
+                });
+                continue;
             }
             if in_branch && self.peek_byte(b'"') {
                 return Err(self.error(
@@ -148,9 +155,18 @@ impl<'a> PatternParser<'a> {
             }
             if self.peek_byte(b'\\') {
                 let escape_start = self.position;
-                let decoded = self.escape()?;
-                Self::begin_text(&mut text_start, escape_start);
-                text_value.push(decoded);
+                match self.escape()? {
+                    EscapeValue::Text(decoded) => {
+                        Self::begin_text(&mut text_start, escape_start);
+                        text_value.push(decoded);
+                    }
+                    EscapeValue::LineBreak => {
+                        self.flush_text(&mut parts, &mut text_value, &mut text_start, escape_start);
+                        parts.push(PatternPart::LineBreak {
+                            span: self.span(escape_start, self.position),
+                        });
+                    }
+                }
             } else if self.peek_byte(b'{') {
                 self.flush_text(&mut parts, &mut text_value, &mut text_start, self.position);
                 let selector = self.selector(depth)?;
@@ -183,9 +199,9 @@ impl<'a> PatternParser<'a> {
     fn selector(&mut self, depth: PatternDepth) -> Result<PatternPart, LocaleParseError> {
         let start = self.position;
         self.position += 1;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let name = self.identifier(false)?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         if self.consume_byte(b'}') {
             return Ok(PatternPart::Argument {
                 name,
@@ -193,12 +209,12 @@ impl<'a> PatternParser<'a> {
             });
         }
         self.require_byte(b',', "expected `}` or `, plural,` after selector name")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let kind_start = self.position;
         let kind = self.take_ascii_word().to_string();
-        self.skip_pattern_space();
+        self.skip_selector_space();
         self.require_byte(b',', "expected `,` after selector kind")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         match kind.as_str() {
             "plural" => self.plural_selector(start, name, PluralKind::Cardinal, depth),
             "ordinal" => self.plural_selector(start, name, PluralKind::Ordinal, depth),
@@ -273,7 +289,7 @@ impl<'a> PatternParser<'a> {
                 (PluralCase::Category(category), self.position)
             };
             let case_span = self.span(category_start, case_end);
-            self.skip_pattern_space();
+            self.skip_selector_space();
             let branch_start = category_start;
             let open_brace = self.position;
             self.require_byte(b'{', "expected `{` before plural branch pattern")?;
@@ -291,11 +307,11 @@ impl<'a> PatternParser<'a> {
                 pattern,
                 span: self.span(branch_start, self.position),
             });
-            self.skip_pattern_space();
+            self.skip_selector_space();
             if self.consume_byte(b'}') {
                 break;
             }
-            if self.is_eof() || self.peek_byte(b'\r') || self.peek_byte(b'\n') {
+            if self.is_eof() {
                 return Err(self.error(
                     self.position,
                     self.position,
@@ -318,9 +334,9 @@ impl<'a> PatternParser<'a> {
     ) -> Result<PatternPart, LocaleParseError> {
         let operation_start = self.position;
         let operation = self.take_ascii_word().to_string();
-        self.skip_pattern_space();
+        self.skip_selector_space();
         self.require_byte(b',', "expected `,` after format operation")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let options = match operation.as_str() {
             "decimal" => self.decimal_options()?,
             "currency" => self.currency_options()?,
@@ -335,7 +351,7 @@ impl<'a> PatternParser<'a> {
                 self.require_option_comma("expected `,` before `time_zone`")?;
                 self.option_name("time_zone")?;
                 self.require_byte(b':', "expected `:` after `time_zone`")?;
-                self.skip_pattern_space();
+                self.skip_selector_space();
                 let time_zone = self.quoted_option_string()?;
                 FormatOptions::Instant { style, time_zone }
             }
@@ -347,7 +363,7 @@ impl<'a> PatternParser<'a> {
                 ));
             }
         };
-        self.skip_pattern_space();
+        self.skip_selector_space();
         self.require_byte(b'}', "expected `}` after format options")?;
         Ok(PatternPart::Format {
             name,
@@ -359,7 +375,7 @@ impl<'a> PatternParser<'a> {
     fn decimal_options(&mut self) -> Result<FormatOptions, LocaleParseError> {
         self.option_name("grouping")?;
         self.require_byte(b':', "expected `:` after `grouping`")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let grouping = match self.take_ascii_word() {
             "none" => Grouping::None,
             "auto" => Grouping::Auto,
@@ -374,12 +390,12 @@ impl<'a> PatternParser<'a> {
         self.require_option_comma("expected `,` before `precision`")?;
         self.option_name("precision")?;
         self.require_byte(b':', "expected `:` after `precision`")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let precision = self.precision_option()?;
         self.require_option_comma("expected `,` before `rounding`")?;
         self.option_name("rounding")?;
         self.require_byte(b':', "expected `:` after `rounding`")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let rounding = self.rounding_option()?;
         Ok(FormatOptions::Decimal {
             grouping,
@@ -391,7 +407,7 @@ impl<'a> PatternParser<'a> {
     fn currency_options(&mut self) -> Result<FormatOptions, LocaleParseError> {
         self.option_name("precision")?;
         self.require_byte(b':', "expected `:` after `precision`")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let precision_value = self.take_ascii_word().to_string();
         let precision = match precision_value.as_str() {
             "currency" => CurrencyPrecision::CurrencyDefault,
@@ -400,7 +416,7 @@ impl<'a> PatternParser<'a> {
         self.require_option_comma("expected `,` before `rounding`")?;
         self.option_name("rounding")?;
         self.require_byte(b':', "expected `:` after `rounding`")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let rounding = self.rounding_option()?;
         Ok(FormatOptions::Currency {
             precision,
@@ -411,7 +427,7 @@ impl<'a> PatternParser<'a> {
     fn style_option(&mut self) -> Result<FormatStyle, LocaleParseError> {
         self.option_name("style")?;
         self.require_byte(b':', "expected `:` after `style`")?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         match self.take_ascii_word() {
             "short" => Ok(FormatStyle::Short),
             "medium" => Ok(FormatStyle::Medium),
@@ -474,11 +490,11 @@ impl<'a> PatternParser<'a> {
     }
 
     fn option_name(&mut self, expected: &str) -> Result<(), LocaleParseError> {
-        self.skip_pattern_space();
+        self.skip_selector_space();
         let start = self.position;
         let found = self.take_ascii_word();
         if found == expected {
-            self.skip_pattern_space();
+            self.skip_selector_space();
             Ok(())
         } else {
             Err(self.error(
@@ -490,9 +506,9 @@ impl<'a> PatternParser<'a> {
     }
 
     fn require_option_comma(&mut self, message: &str) -> Result<(), LocaleParseError> {
-        self.skip_pattern_space();
+        self.skip_selector_space();
         self.require_byte(b',', message)?;
-        self.skip_pattern_space();
+        self.skip_selector_space();
         Ok(())
     }
 
@@ -545,7 +561,7 @@ impl<'a> PatternParser<'a> {
         loop {
             let branch_start = self.position;
             let case = self.identifier(false)?;
-            self.skip_pattern_space();
+            self.skip_selector_space();
             let open_brace = self.position;
             self.require_byte(b'{', "expected `{` before select branch pattern")?;
             let mut pattern = self.parse_pattern(
@@ -561,11 +577,11 @@ impl<'a> PatternParser<'a> {
                 pattern,
                 span: self.span(branch_start, self.position),
             });
-            self.skip_pattern_space();
+            self.skip_selector_space();
             if self.consume_byte(b'}') {
                 break;
             }
-            if self.is_eof() || self.peek_byte(b'\r') || self.peek_byte(b'\n') {
+            if self.is_eof() {
                 return Err(self.error(
                     self.position,
                     self.position,
@@ -580,7 +596,7 @@ impl<'a> PatternParser<'a> {
         })
     }
 
-    fn escape(&mut self) -> Result<char, LocaleParseError> {
+    fn escape(&mut self) -> Result<EscapeValue, LocaleParseError> {
         let start = self.position;
         self.position += 1;
         let Some(code) = self.source.as_bytes().get(self.position).copied() else {
@@ -588,15 +604,17 @@ impl<'a> PatternParser<'a> {
         };
         self.position += 1;
         match code {
-            b'\\' => Ok('\\'),
-            b'"' => Ok('"'),
-            b'n' => Ok('\n'),
-            b'r' => Ok('\r'),
-            b't' => Ok('\t'),
-            b'{' => Ok('{'),
-            b'}' => Ok('}'),
-            b'#' => Ok('#'),
-            b'u' => self.unicode_escape(start),
+            b'\\' => Ok(EscapeValue::Text('\\')),
+            b'"' => Ok(EscapeValue::Text('"')),
+            b'n' | b'r' => Ok(EscapeValue::LineBreak),
+            b't' => Ok(EscapeValue::Text('\t')),
+            b'{' => Ok(EscapeValue::Text('{')),
+            b'}' => Ok(EscapeValue::Text('}')),
+            b'#' => Ok(EscapeValue::Text('#')),
+            b'u' => self.unicode_escape(start).map(|character| match character {
+                '\n' | '\r' => EscapeValue::LineBreak,
+                character => EscapeValue::Text(character),
+            }),
             _ => Err(self.error(start, self.position, "unknown escape sequence")),
         }
     }
@@ -669,8 +687,27 @@ impl<'a> PatternParser<'a> {
         self.source.get(start..self.position).unwrap_or("")
     }
 
-    fn skip_pattern_space(&mut self) {
-        while self.peek_byte(b' ') || self.peek_byte(b'\t') {
+    fn skip_selector_space(&mut self) {
+        while self.peek_byte(b' ')
+            || self.peek_byte(b'\t')
+            || self.peek_byte(b'\r')
+            || self.peek_byte(b'\n')
+        {
+            if self.peek_byte(b'\r') || self.peek_byte(b'\n') {
+                self.consume_line_break();
+            } else {
+                self.position += 1;
+            }
+        }
+    }
+
+    fn consume_line_break(&mut self) {
+        if self.peek_byte(b'\r') {
+            self.position += 1;
+            if self.peek_byte(b'\n') {
+                self.position += 1;
+            }
+        } else if self.peek_byte(b'\n') {
             self.position += 1;
         }
     }

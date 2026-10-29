@@ -48,7 +48,7 @@ pub enum TagError {
     InvalidSubtag,
     /// Subtags do not fit the BCP 47 component order.
     InvalidStructure,
-    /// The tag contains an extension sequence rejected by format version 1.
+    /// The tag contains an extension sequence rejected by format version 2.
     ExtensionRejected,
     /// An extension singleton has no following extension subtag.
     ExtensionMissingSubtag,
@@ -92,7 +92,7 @@ impl TagError {
             Self::InvalidSubtag => "locale subtags must contain 1 to 8 ASCII letters or digits",
             Self::InvalidStructure => "locale tag does not follow BCP 47 syntax",
             Self::ExtensionRejected => {
-                "BCP 47 extension sequences are rejected by locale format version 1"
+                "BCP 47 extension sequences are rejected by locale format version 2"
             }
             Self::ExtensionMissingSubtag => {
                 "BCP 47 extension singleton requires one or more subtags"
@@ -103,7 +103,7 @@ impl TagError {
 }
 
 impl<'a> ParsedTag<'a> {
-    /// Parses a complete BCP 47 tag under the version 1 extension policy.
+    /// Parses a complete BCP 47 tag under the version 2 extension policy.
     pub fn parse(source: &'a str) -> Result<ParsedTag<'a>, TagError> {
         if source.is_empty() {
             return Err(TagError::Empty);

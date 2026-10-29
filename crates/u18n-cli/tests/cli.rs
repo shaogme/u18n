@@ -280,7 +280,7 @@ fn compiles_typed_messages_and_reports_reproducible_metadata() -> Result<(), Box
     )?;
     check(output.status.success());
     let generated = fixture.generated()?;
-    check(generated.contains("output-format-version=1"));
+    check(generated.contains("output-format-version=2"));
     check(generated.contains("cldr-cardinal-rules-sha256=69a30c57a621de9c52ec6ca95fe7bf9f06df6f8c13ca71a72e447b532c92cff7"));
     check(generated.contains("cldr-ordinal-rules-sha256=6c62fa2250f4f0150a3c7e24fc93c20ae6722f65bd26b49aaad799b40f8014b3"));
     check(generated.contains(
@@ -300,6 +300,31 @@ fn compiles_typed_messages_and_reports_reproducible_metadata() -> Result<(), Box
     let statistics = String::from_utf8(output.stderr)?;
     check(statistics.contains("dynamic shared pool: 4 literal fragments"));
     check(statistics.contains("keyed shard pools:"));
+    Ok(())
+}
+
+#[test]
+fn compiles_a_crlf_locale_fixture_with_a_rendered_line_break() -> Result<(), Box<dyn Error>> {
+    let fixture = Fixture::new()?;
+    let source_directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/crlf");
+    let schema = source_directory.join("schema.u18n");
+    let locale = source_directory.join("en.u18n");
+    let output_path = fixture.root.join("generated.rs");
+    let output = Command::new(env!("CARGO_BIN_EXE_u18n-cli"))
+        .arg("compile")
+        .arg("--schema")
+        .arg(&schema)
+        .arg("--locale")
+        .arg(&locale)
+        .arg("--output")
+        .arg(&output_path)
+        .output()?;
+
+    check(output.status.success());
+    let generated = fs::read_to_string(output_path)?;
+    check(generated.contains("output-format-version=2"));
+    check(generated.contains("Instruction::LineBreak"));
+    check(generated.contains("text_pool: \"firstsecond\""));
     Ok(())
 }
 

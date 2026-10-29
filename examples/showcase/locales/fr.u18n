@@ -1,1 +1,11 @@
 locale fr fallback en;
+
+message app.multiline = "Panier :
+{count, plural,
+    one {# article
+    dans le panier}
+    many {# articles
+    dans le panier}
+    other {# articles
+    dans le panier}
+}";
