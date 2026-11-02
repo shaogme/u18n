@@ -42,6 +42,9 @@ fn run() -> Result<(), String> {
             if args.locale_tag_fallback() {
                 options = options.with_locale_tag_fallback(true);
             }
+            if args.cow_macro_output() {
+                options = options.with_cow_macro_output(true);
+            }
             if let Some(final_fallback) = args.final_fallback_locale() {
                 options = options.with_final_fallback_locale(final_fallback);
             }

@@ -33,6 +33,7 @@ struct ParameterSpec {
 
 struct InvocationMetadata {
     needs_formatter: bool,
+    cow_macro_output: bool,
     parameters: Vec<ParameterSpec>,
 }
 
@@ -54,6 +55,8 @@ impl Parse for InvocationMetadata {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let needs_formatter = input.parse::<LitBool>()?.value;
         input.parse::<Token![,]>()?;
+        let cow_macro_output = input.parse::<LitBool>()?.value;
+        input.parse::<Token![,]>()?;
         let parameters_content;
         bracketed!(parameters_content in input);
         let parameters = parameters_content
@@ -63,6 +66,7 @@ impl Parse for InvocationMetadata {
         Self::validate_parameter_names(&parameters)?;
         Ok(Self {
             needs_formatter,
+            cow_macro_output,
             parameters,
         })
     }
@@ -433,10 +437,15 @@ fn emit_render_expression(
                 "zero-argument message cannot require a formatter",
             ));
         }
+        let render = if metadata.cow_macro_output {
+            quote!(#message_data_binding.render(#locale_binding, &[]))
+        } else {
+            quote!(#message_data_binding.render_static(#locale_binding))
+        };
         return Ok(quote! {{
             let #locale_binding = #locale;
             let #message_data_binding = #message_data;
-            #message_data_binding.render_static(#locale_binding)
+            #render
         }});
     }
     let argument_bindings = (0..arguments.evaluation_order.len())
@@ -464,6 +473,7 @@ fn emit_render_expression(
     let argument_count = LitInt::new(&metadata.parameters.len().to_string(), Span::call_site());
     let argument_values = quote! { #(#argument_values),* };
     let has_formatter = formatter.is_some();
+    let cow_macro_output = metadata.cow_macro_output;
     let formatter_binding_statement = if let Some(formatter_expression) = formatter {
         quote_spanned!(formatter_expression.span()=> let #formatter_binding = #formatter_expression;)
     } else {
@@ -471,13 +481,23 @@ fn emit_render_expression(
     };
     if metadata.needs_formatter {
         let render = if has_formatter {
-            quote!(#message_data_binding.render_with_owned(
+            let method = if cow_macro_output {
+                quote!(render_with)
+            } else {
+                quote!(render_with_owned)
+            };
+            quote!(#message_data_binding.#method(
                 #locale_binding,
                 #formatter_binding,
                 &__u18n_arguments
             ))
         } else {
-            quote!(#message_data_binding.render_owned(
+            let method = if cow_macro_output {
+                quote!(render)
+            } else {
+                quote!(render_owned)
+            };
+            quote!(#message_data_binding.#method(
                 #locale_binding,
                 &__u18n_arguments
             ))
@@ -491,12 +511,17 @@ fn emit_render_expression(
             #render
         }})
     } else {
+        let method = if cow_macro_output {
+            quote!(render)
+        } else {
+            quote!(render_owned)
+        };
         Ok(quote! {{
             let #locale_binding = #locale;
             let #message_data_binding = #message_data;
             #(#argument_binding_statements)*
             let __u18n_arguments: [::u18n::ArgumentValue<'_>; #argument_count] = [#argument_values];
-            #message_data_binding.render_owned(#locale_binding, &__u18n_arguments)
+            #message_data_binding.#method(#locale_binding, &__u18n_arguments)
         }})
     }
 }
@@ -583,7 +608,7 @@ fn accepts_zero_argument_positional_and_named_forms() {
 
 #[test]
 fn supports_schema_parameter_named_underscore() {
-    let metadata = parse2::<InvocationMetadata>(quote!(false, [(_, string)]));
+    let metadata = parse2::<InvocationMetadata>(quote!(false, false, [(_, string)]));
     assert!(metadata.is_ok());
     let Some(metadata) = metadata.ok() else {
         return;

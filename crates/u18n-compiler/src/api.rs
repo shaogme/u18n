@@ -63,6 +63,7 @@ pub struct CompilerOptions {
     pool_limit: usize,
     atomic_locale: bool,
     locale_tag_fallback: bool,
+    cow_macro_output: bool,
     final_fallback_locale: Option<String>,
     render_error_fallback_message: Option<String>,
 }
@@ -95,6 +96,15 @@ impl CompilerOptions {
         self.locale_tag_fallback
     }
 
+    pub fn with_cow_macro_output(mut self, cow_macro_output: bool) -> Self {
+        self.cow_macro_output = cow_macro_output;
+        self
+    }
+
+    pub fn cow_macro_output(&self) -> bool {
+        self.cow_macro_output
+    }
+
     pub fn with_final_fallback_locale(mut self, locale: impl Into<String>) -> Self {
         self.final_fallback_locale = Some(locale.into());
         self
@@ -120,6 +130,7 @@ impl Default for CompilerOptions {
             pool_limit: 256,
             atomic_locale: false,
             locale_tag_fallback: false,
+            cow_macro_output: false,
             final_fallback_locale: None,
             render_error_fallback_message: None,
         }
@@ -246,6 +257,7 @@ impl Compiler {
             pool_limit: self.options.pool_limit,
             atomic_locale: self.options.atomic_locale,
             locale_tag_fallback: self.options.locale_tag_fallback,
+            cow_macro_output: self.options.cow_macro_output,
             final_fallback_locale: self.options.final_fallback_locale.as_deref(),
             render_error_fallback_message: self.options.render_error_fallback_message.as_deref(),
         };

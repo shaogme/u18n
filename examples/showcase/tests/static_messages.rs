@@ -76,9 +76,10 @@ fn generated_key_and_dynamic_calls_borrow_without_allocating() {
     let french_locale = &catalogs::locale_fr::LOCALE;
     let french_catalog = &catalogs::locale_fr::CATALOG;
     let tracking = AllocationSession::begin();
-    let keyed: Result<&'static str, RenderError> = black_box(m_app_stitle!(locale));
-    let named: Result<&'static str, RenderError> = black_box(m_app_stitle!(locale, {}));
-    let keyed_fallback: Result<&'static str, RenderError> = black_box(m_app_stitle!(french_locale));
+    let keyed: Result<Cow<'static, str>, RenderError> = black_box(m_app_stitle!(locale));
+    let named: Result<Cow<'static, str>, RenderError> = black_box(m_app_stitle!(locale, {}));
+    let keyed_fallback: Result<Cow<'static, str>, RenderError> =
+        black_box(m_app_stitle!(french_locale));
     let direct: Result<&'static str, RenderError> =
         black_box(catalogs::__MESSAGE_DATA_1.render_static(locale));
     let dynamic = black_box(catalog.render(1, &[]));
@@ -86,9 +87,9 @@ fn generated_key_and_dynamic_calls_borrow_without_allocating() {
     let allocation_count = tracking.finish();
 
     assert_eq!(allocation_count, 0);
-    assert_eq!(keyed, Ok("Tiny Cart"));
-    assert_eq!(named, Ok("Tiny Cart"));
-    assert_eq!(keyed_fallback, Ok("Tiny Cart"));
+    assert_eq!(keyed, Ok(Cow::Borrowed("Tiny Cart")));
+    assert_eq!(named, Ok(Cow::Borrowed("Tiny Cart")));
+    assert_eq!(keyed_fallback, Ok(Cow::Borrowed("Tiny Cart")));
     assert_eq!(direct, Ok("Tiny Cart"));
     assert!(matches!(dynamic, Ok(Cow::Borrowed("Tiny Cart"))));
     assert!(matches!(dynamic_fallback, Ok(Cow::Borrowed("Tiny Cart"))));

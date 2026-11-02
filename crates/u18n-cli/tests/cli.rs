@@ -313,6 +313,60 @@ fn locale_tag_fallback_flag_is_opt_in_and_independent_of_atomic_selection()
 }
 
 #[test]
+fn cow_macro_output_option_is_opt_in_compile_only_and_rejects_duplicates()
+-> Result<(), Box<dyn Error>> {
+    let fixture = Fixture::new()?;
+    let schema = "schema 1; message app.title(); message app.greeting(name: string);";
+    let locales = [(
+        "en.u18n",
+        "locale en; message app.title = \"Title\"; message app.greeting = \"Hello {name}\";",
+    )];
+
+    let default = fixture.run_with_options("compile", schema, &locales, &[])?;
+    check(default.status.success());
+    let default_source = String::from_utf8(default.stdout)?;
+    check(default_source.contains("cow-macro-output=false"));
+    check(default_source.contains("[false, false, []]"));
+
+    let enabled = fixture.run_with_options("compile", schema, &locales, &["--cow-macro-output"])?;
+    check(enabled.status.success());
+    let enabled_source = String::from_utf8(enabled.stdout)?;
+    check(enabled_source.contains("cow-macro-output=true"));
+    check(enabled_source.contains("[false, true, []]"));
+    check(enabled_source.contains("[false, true, [(name, string)]]"));
+    check(enabled_source.contains("output-format-version=3"));
+
+    let duplicate = fixture.run_with_options(
+        "compile",
+        schema,
+        &locales,
+        &["--cow-macro-output", "--cow-macro-output"],
+    )?;
+    check(!duplicate.status.success());
+    check(String::from_utf8(duplicate.stderr)?.contains("duplicate --cow-macro-output"));
+
+    let extract = fixture.run_with_options(
+        "extract",
+        schema,
+        &locales,
+        &["--cow-macro-output", "--source-locale", "en"],
+    )?;
+    check(!extract.status.success());
+    check(
+        String::from_utf8(extract.stderr)?.contains("--cow-macro-output is only valid for compile"),
+    );
+
+    let coverage =
+        fixture.run_with_options("coverage", schema, &locales, &["--cow-macro-output"])?;
+    check(!coverage.status.success());
+    check(
+        String::from_utf8(coverage.stderr)?
+            .contains("--cow-macro-output is only valid for compile"),
+    );
+    Ok(())
+}
+
+#[test]
 fn help_documents_atomic_selection_requirements() -> Result<(), Box<dyn Error>> {
     let output = Command::new(env!("CARGO_BIN_EXE_u18n-cli"))
         .arg("--help")
@@ -324,6 +378,7 @@ fn help_documents_atomic_selection_requirements() -> Result<(), Box<dyn Error>> 
     check(help.contains("input locale catalog"));
     check(help.contains("--render-error-fallback-message TEXT"));
     check(help.contains("[--locale-tag-fallback]"));
+    check(help.contains("[--cow-macro-output]"));
     Ok(())
 }
 

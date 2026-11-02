@@ -10,10 +10,10 @@ Add the runtime to your application and the compiler as a build dependency:
 
 ```toml
 [dependencies]
-u18n = "0.3.0"
+u18n = "0.3.1"
 
 [build-dependencies]
-u18n-compiler = "0.3.0"
+u18n-compiler = "0.3.1"
 ```
 
 Create these files in the package root:
@@ -109,7 +109,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let options = CompilerOptions::default()
         .with_locale_tag_fallback(true)
-        .with_render_error_fallback_message("Unable to render message");
+        .with_render_error_fallback_message("Unable to render message")
+        .with_cow_macro_output(true);
     let generated = Compiler::new(options).compile(input)?;
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?)
         .join("u18n_messages.rs");
@@ -144,11 +145,13 @@ requires every message to resolve for every locale before it generates Rust.
 For tag parsing, fallback order, and generated variant names, see [Advanced usage](advance.md#select-a-locale-for-each-call)
 and [Locale identity policy](policy.md#runtime-catalog-selection).
 
-The CLI flag can be enabled independently of atomic locale selection:
+The CLI `--cow-macro-output` flag selects the same keyed macro result type as the build-script
+option and can be enabled independently of atomic locale selection:
 
 ```sh
 u18n-cli compile --schema schema.u18n --locale locales/en.u18n \
-  --locale locales/es-419.u18n --locale-tag-fallback --output "$OUT_DIR/catalogs.rs"
+  --locale locales/es-419.u18n --locale-tag-fallback --cow-macro-output \
+  --output "$OUT_DIR/catalogs.rs"
 ```
 
 ## 5. Render a message
@@ -192,17 +195,16 @@ let text = t!(
 );
 ```
 
-Key macros for messages with no schema parameters return `Result<&'static str, RenderError>`;
-parameterized key macros return `Result<String, RenderError>`. The dynamic numeric-ID API returns
-`Result<RenderedMessage, RenderError>`, where `RenderedMessage` is borrowed for zero-argument
-messages and owned for parameterized messages. Call `.into_owned()` when a dynamic call must yield
-a `String` in every case. The build script above configures a fixed render-error fallback, so its
-`t!` calls return `&'static str` for zero-argument
-messages and `String` for parameterized messages, using the fixed text only when rendering returns
-an error. The generated `m_*` macros and dynamic and streaming APIs continue to return
-`Result<_, RenderError>`. Without that option, `t!` returns the same `Result` as the matching
-message macro. The [Result-returning example](../examples/result-api/README.md) shows that
-configuration.
+By default, key macros for messages with no schema parameters return
+`Result<&'static str, RenderError>`, and parameterized key macros return `Result<String,
+RenderError>`. `with_cow_macro_output(true)` selects `Result<RenderedMessage, RenderError>` for
+both forms, where the public `RenderedMessage` alias is `Cow<'static, str>`: static text is
+`Borrowed`, and parameterized output is `Owned`. The dynamic numeric-ID API already returns this
+type. Call `.into_owned()` when a call must yield a `String` in every case. With both options set
+in the build script above, `m_*` calls return the Cow result and `t!` lazily converts the fixed
+error fallback to a borrowed Cow. Without Cow output, the fallback's success type follows the
+message signature. The [Result-returning example](../examples/result-api/README.md) shows `t!`
+without a fixed fallback.
 
 `LocaleTag::from_str` accepts ASCII case variations and returns the authored spelling from
 `as_str()`. Source fallback targets remain case-sensitive. The Spanish `cart.hint` call above

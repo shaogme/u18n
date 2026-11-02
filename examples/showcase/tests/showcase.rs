@@ -175,15 +175,21 @@ fn keyed_macros_accept_generated_and_application_locale_providers() {
     };
     let count = PluralCount::new(2);
 
-    assert_eq!(m_app_stitle!(spanish_tag), Ok("Carrito pequeño"));
+    assert_eq!(
+        m_app_stitle!(spanish_tag),
+        Ok(Cow::Borrowed("Carrito pequeño"))
+    );
     assert_eq!(t!("app.title", locale = spanish_tag), "Carrito pequeño");
-    assert_eq!(m_app_stitle!(&request_locale), Ok("Carrito pequeño"));
+    assert_eq!(
+        m_app_stitle!(&request_locale),
+        Ok(Cow::Borrowed("Carrito pequeño"))
+    );
     assert_eq!(t!("app.title", locale = &request_locale), "Carrito pequeño");
 
     let expected_items = String::from("Ada tiene 2 artículos en el carrito. Gracias, señora.");
     assert_eq!(
         m_cart_sitems!(spanish_tag, count, "Ada", "female"),
-        Ok(expected_items.clone())
+        Ok(Cow::Owned(expected_items.clone()))
     );
     assert_eq!(
         t!(
@@ -191,13 +197,13 @@ fn keyed_macros_accept_generated_and_application_locale_providers() {
             locale = spanish_tag,
             { count, owner: "Ada", gender: "female" }
         ),
-        expected_items
+        Cow::<str>::Owned(expected_items.clone())
     );
     assert_eq!(
         m_cart_sitems!(&request_locale, count, "Ada", "female"),
-        Ok(String::from(
+        Ok(Cow::Owned(String::from(
             "Ada tiene 2 artículos en el carrito. Gracias, señora.",
-        ))
+        )))
     );
     assert_eq!(
         t!(
@@ -205,7 +211,9 @@ fn keyed_macros_accept_generated_and_application_locale_providers() {
             locale = &request_locale,
             { count, owner: "Ada", gender: "female" }
         ),
-        String::from("Ada tiene 2 artículos en el carrito. Gracias, señora.")
+        Cow::<str>::Owned(String::from(
+            "Ada tiene 2 artículos en el carrito. Gracias, señora.",
+        ))
     );
 
     let formatter = ExampleFormatter;
@@ -231,15 +239,17 @@ fn multiline_patterns_keep_literal_breaks_and_ignore_selector_layout_breaks() {
 
     assert_eq!(
         m_app_smultiline!(english, PluralCount::new(2)),
-        Ok(String::from("Cart:\n2 items\n    in the cart"))
+        Ok(Cow::Owned(String::from("Cart:\n2 items\n    in the cart")))
     );
     assert_eq!(
         m_app_smultiline!(english, PluralCount::new(1)),
-        Ok(String::from("Cart:\n1 item\n    in the cart"))
+        Ok(Cow::Owned(String::from("Cart:\n1 item\n    in the cart")))
     );
     assert_eq!(
         m_app_smultiline!(french, PluralCount::new(2)),
-        Ok(String::from("Panier :\n2 articles\n    dans le panier"))
+        Ok(Cow::Owned(String::from(
+            "Panier :\n2 articles\n    dans le panier"
+        )))
     );
 }
 
@@ -311,17 +321,54 @@ fn translation_fallback_handles_render_errors_without_changing_message_macros() 
 }
 
 #[test]
+fn cow_macro_output_preserves_borrowed_static_and_fallback_text() {
+    let english = &catalogs::locale_en::LOCALE;
+    let static_text = m_app_stitle!(english).expect("static title renders");
+    assert!(matches!(static_text, Cow::Borrowed("Tiny Cart")));
+
+    let rendered = m_cart_sitems!(english, PluralCount::new(2), "Ada", "female")
+        .expect("parameterized message renders");
+    assert!(matches!(rendered, Cow::Owned(_)));
+
+    let amount = Decimal::new(1995, 2);
+    let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
+    let formatter = ExampleFormatter;
+    let formatted = m_cart_styped_utotal!(english, &formatter, amount, charge)
+        .expect("formatted message renders");
+    assert!(matches!(formatted, Cow::Owned(_)));
+    let formatted_translation = t!(
+        "cart.typed_total",
+        locale = english,
+        formatter = &formatter,
+        { amount, charge }
+    );
+    assert!(matches!(formatted_translation, Cow::Owned(_)));
+
+    let mismatched_locale = Locale::new_trusted(english.index(), "wrong-tag");
+    let fallback = t!("app.title", locale = &mismatched_locale);
+    assert!(matches!(
+        fallback,
+        Cow::Borrowed("Unable to render message")
+    ));
+    let parameterized_fallback = t!("cart.typed_total", locale = english, { amount, charge });
+    assert!(matches!(
+        parameterized_fallback,
+        Cow::Borrowed("Unable to render message")
+    ));
+}
+
+#[test]
 fn renders_decimal_cardinal_values_with_their_visible_scale() {
     let value = PluralDecimal::new(150, 2).expect("valid plural decimal");
     assert_eq!(
         m_cart_sdecimal_ucount!(&catalogs::locale_es_419::LOCALE, value,),
-        Ok(String::from("1.50 items"))
+        Ok(Cow::Owned(String::from("1.50 items")))
     );
 
     let exact = PluralDecimal::new(200, 2).expect("valid plural decimal");
     assert_eq!(
         m_cart_sdecimal_ucount!(&catalogs::locale_en::LOCALE, exact),
-        Ok(String::from("exact 2.00"))
+        Ok(Cow::Owned(String::from("exact 2.00")))
     );
 }
 
@@ -546,7 +593,7 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
         m_app_stitle!(english_locale).as_deref(),
         english.render(1, &[]).as_deref()
     );
-    assert_eq!(m_app_stitle!(french_locale), Ok("Tiny Cart"));
+    assert_eq!(m_app_stitle!(french_locale), Ok(Cow::Borrowed("Tiny Cart")));
     assert!(matches!(
         french.render(1, &[]),
         Ok(Cow::Borrowed("Tiny Cart"))

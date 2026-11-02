@@ -39,6 +39,7 @@ pub(super) struct GenerationConfig<'a> {
     pub(super) pool_limit: usize,
     pub(super) atomic_locale: bool,
     pub(super) locale_tag_fallback: bool,
+    pub(super) cow_macro_output: bool,
     pub(super) final_fallback_locale: Option<&'a str>,
     pub(super) render_error_fallback_message: Option<&'a str>,
 }

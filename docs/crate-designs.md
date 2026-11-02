@@ -86,9 +86,9 @@ allowing the compiler to explain fallback references to files that failed to par
 
 [`crates/u18n-compiler/src/api.rs`](../crates/u18n-compiler/src/api.rs) is the public facade.
 `CompilationInput` owns the schema and locale source files; `Compiler` exposes `compile`,
-`extract`, and `coverage`; `CompilerOptions` carries string-pool, optional atomic-locale, and
-optional `t!` render-error fallback settings. Parsing, validation, and code generation share this
-API, so the CLI and build scripts use the same compilation behavior.
+`extract`, and `coverage`; `CompilerOptions` carries string-pool, optional atomic-locale, keyed
+macro output, and optional `t!` render-error fallback settings. Parsing, validation, and code
+generation share this API, so the CLI and build scripts use the same compilation behavior.
 
 The implementation is split by phase:
 
@@ -123,14 +123,16 @@ catalog selection when locale-tag fallback generation is enabled. The source loc
 remains the catalog identity.
 
 The fingerprint orders locale inputs by source tag. It includes source contents, generation
-settings, output-format version (`3`), CLDR version, IANA registry digest, CLDR cardinal-rule,
-ordinal-rule, alias, and supplemental-data digests, and the locale extension policy. The
-cardinal-rule and alias digests identify inputs used for plural resolution; the supplemental-data
+settings including `cow-macro-output=true|false`, output-format version (`3`), CLDR version, IANA
+registry digest, CLDR cardinal-rule, ordinal-rule, alias, and supplemental-data digests, and the
+locale extension policy. The cardinal-rule and alias digests identify inputs used for plural
+resolution; the supplemental-data
 digest remains included because it also contains plural-component parent data. When enabled, the
 `locale-tag-fallback-generation` setting controls whether main-component parent mappings and
-`LocaleTag::fallback` are generated. The string pool uses ordered fragments; overlap optimization is skipped
-when its configured limits would make the work excessive. Generated metadata records the format
-version, locale-data identifiers, pool limit, and locale-selection settings.
+`LocaleTag::fallback` are generated. The string pool uses ordered fragments; overlap optimization
+is skipped when its configured limits would make the work excessive. Generated metadata records the
+format version, locale-data identifiers, pool limit, locale-selection settings, and
+`cow-macro-output=true|false`.
 
 ### `u18n-macros`
 
@@ -157,14 +159,16 @@ injective encoding for `_`, `-`, and `.`.
 [`crates/u18n/src/catalog.rs`](../crates/u18n/src/catalog.rs) defines dynamic shared-store
 records, locale-local message bindings, typed argument values, value wrappers, `Catalog`, the
 lightweight `Locale`, the `LocaleProvider` adapter trait, keyed `MessageData` and shard tables,
-`RenderedMessage`, and `RenderError`. `MessageData` accepts providers by value; the renderer still
-uses the resolved `Locale` for shard-index and exact-tag validation.
-Generated zero-argument key macros return `Result<&'static str, RenderError>`; parameterized key
-macros return `Result<String, RenderError>`. The dynamic `Catalog::render` and generic
-`MessageData::render` methods return `RenderedMessage` (`Cow<'static, str>`), borrowed for
-zero-argument messages and owned for parameterized messages. Dynamic callers can call
-`into_owned()` when they always need a `String`. Both paths also offer sink-writing methods, with
-formatter variants.
+`RenderedMessage`, and `RenderError`. `RenderedMessage` is the public `Cow<'static, str>` alias.
+`MessageData` accepts providers by value; the renderer still uses the resolved `Locale` for
+shard-index and exact-tag validation. By default, generated zero-argument key macros return
+`Result<&'static str, RenderError>` and parameterized key macros return `Result<String,
+RenderError>`. `CompilerOptions::with_cow_macro_output(true)` selects `Result<RenderedMessage,
+RenderError>` for `m_*` and for `t!` without a fixed fallback. With a fixed fallback, `t!` returns
+`RenderedMessage` directly. The CLI exposes the same compile-time option as `--cow-macro-output`.
+Static results remain borrowed and rendered messages remain owned. Dynamic `Catalog::render` and
+generic `MessageData::render` already return that Cow behavior independently of the option. Both
+paths also offer sink-writing methods, with formatter variants.
 
 [`crates/u18n/src/format.rs`](../crates/u18n/src/format.rs) keeps dynamic message-ID lookup
 through sorted locale bindings and explicit fallback links separate from keyed locale-index

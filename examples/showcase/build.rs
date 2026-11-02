@@ -37,7 +37,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_locale_tag_fallback(true)
             .with_atomic_locale(true)
             .with_final_fallback_locale("en")
-            .with_render_error_fallback_message("Unable to render message"),
+            .with_render_error_fallback_message("Unable to render message")
+            .with_cow_macro_output(true),
     )
     .compile(input)?;
     let output =

@@ -264,33 +264,35 @@ Generated `LocaleTag` implements `LocaleProvider`. The runtime also implements t
 Generated message macros use the injective key encoding defined in the schema specification. Each
 macro references only its matching shard and passes a `LocaleProvider` value, never a `Catalog` or
 global numeric message ID. `MessageData` resolves each provider once; keyed lookup continues to
-validate the resulting locale index and exact tag against the shard. A zero-argument macro returns
-`Result<&'static str, RenderError>`
-through the shard's static-text accessor. A parameterized macro returns `Result<String,
-RenderError>` and constructs the typed runtime argument array. The proc-macro helper validates
-positional arity or named fields, evaluates named expressions once in written order, then arranges
-them in schema order. The locale expression is evaluated once; a formatter expression, when
-required, is evaluated next.
+validate the resulting locale index and exact tag against the shard. By default, a zero-argument
+macro returns `Result<&'static str, RenderError>` through the shard's static-text accessor, and a
+parameterized macro returns `Result<String, RenderError>`. The compile-time
+`cow-macro-output=true` option makes both forms return `Result<RenderedMessage, RenderError>`,
+where the public `RenderedMessage` alias is `Cow<'static, str>`. It selects the runtime's
+`MessageData::render` or `render_with` methods so zero-argument results stay borrowed and
+parameterized results stay owned. The proc-macro helper validates positional arity or named fields,
+evaluates named expressions once in written order, then arranges them in schema order. The locale
+expression is evaluated once; a formatter expression, when required, is evaluated next.
 
 The generated `t!` macro dispatches a literal key to its message macro. Non-atomic builds require a
 `locale = expression` header. Atomic builds use the current lightweight locale by default and may
 still receive an explicit `locale` header. Atomic generation requires an explicit final fallback
 locale; the generated selector uses pointer-width atomics. An optional fixed render-error fallback
-converts `t!` errors to `&'static str` for zero-argument messages and `String` for parameterized
-messages. It is lazy and applies only to the rendering result; `m_*`, `MessageData`, `Catalog`, and
-streaming calls retain `Result<_, RenderError>`. `current_catalog()` and
+converts `t!` errors to the configured success type. With Cow macro output it lazily returns the
+fallback as `Cow::Borrowed`; otherwise its type follows the message signature. The `m_*` macros,
+`MessageData`, `Catalog`, and streaming calls retain `Result<_, RenderError>`. `current_catalog()` and
 `FINAL_FALLBACK_CATALOG` remain dynamic-ID conveniences.
 
 The input SHA-256 is length-delimited and includes the raw schema source, raw locale sources ordered
 by source tag, output-format version (`3`), CLDR version, IANA registry digest, cardinal-rule
 digest, ordinal-rule digest, alias digest, supplemental-data digest, extension policy,
-atomic-selection setting, locale-tag-fallback-generation setting, final fallback tag, an optional
-length-delimited render-error fallback message, and string-pool limit. The render-error fallback
+atomic-selection setting, locale-tag-fallback-generation setting, Cow macro output setting, final
+fallback tag, an optional length-delimited render-error fallback message, and string-pool limit. The render-error fallback
 field is omitted when unset; a configured empty string is distinct from no value. Cardinal-rule
 and alias digests identify inputs used for plural resolution; the supplemental digest remains included
 because it also provides plural-component parent data. The generated header records each
-locale-data digest, the resulting fingerprint, and the `locale-tag-fallback-generation=true|false`
-setting. Locale path names and the original order of locale inputs are not included. The hash
+locale-data digest, the resulting fingerprint, the `locale-tag-fallback-generation=true|false`
+setting, and the `cow-macro-output=true|false` setting. Locale path names and the original order of locale inputs are not included. The hash
 domain remains `u18n-catalog-input-v3`, and output-format and fingerprint metadata remain version
 `3`.
 

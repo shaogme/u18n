@@ -10,6 +10,13 @@ struct MessagePlan<'a> {
     message: &'a MessageDef,
     needs_formatter: bool,
     macro_name: String,
+    cow_macro_output: bool,
+}
+
+pub(super) struct MessageEmissionOptions {
+    pub(super) atomic_locale: bool,
+    pub(super) render_error_fallback_enabled: bool,
+    pub(super) cow_macro_output: bool,
 }
 
 pub(super) struct MessageEmitter;
@@ -19,11 +26,10 @@ impl MessageEmitter {
         output: &mut String,
         messages: &[MessageDef],
         formatted_keys: &BTreeSet<String>,
-        atomic_locale: bool,
-        render_error_fallback_enabled: bool,
+        options: MessageEmissionOptions,
     ) -> Result<(), String> {
-        let plans = Self::build_plans(messages, formatted_keys)?;
-        if atomic_locale {
+        let plans = Self::build_plans(messages, formatted_keys, options.cow_macro_output)?;
+        if options.atomic_locale {
             writeln!(
                 output,
                 "use core::{{ptr::{{self, null_mut}}, str::FromStr, sync::atomic::{{AtomicPtr, Ordering}}}};"
@@ -39,15 +45,39 @@ impl MessageEmitter {
         )
         .map_err(|_| "could not format generated source".to_string())?;
         for plan in &plans {
-            Self::emit_macro(output, plan, render_error_fallback_enabled)
+            Self::emit_macro(output, plan, options.render_error_fallback_enabled)
                 .map_err(|_| "could not format generated source".to_string())?;
         }
+        Ok(())
+    }
+
+    pub(super) fn emit_translation_macro(
+        output: &mut String,
+        atomic_locale: bool,
+        render_error_fallback_message: Option<&str>,
+    ) -> Result<(), FmtError> {
+        let fallback = render_error_fallback_message
+            .map_or_else(String::new, |message| format!(", {message:?}"));
+        writeln!(
+            output,
+            "/// Dispatches a literal message key to its generated, schema-checked message macro."
+        )?;
+        writeln!(output, "#[macro_export]")?;
+        writeln!(output, "macro_rules! t {{")?;
+        writeln!(output, "    ($key:literal $(, $($arguments:tt)*)?) => {{")?;
+        writeln!(
+            output,
+            "        ::u18n::__dispatch_translation!($key, {atomic_locale}, [$crate]{fallback}; $($($arguments)*)?)"
+        )?;
+        writeln!(output, "    }};")?;
+        writeln!(output, "}}")?;
         Ok(())
     }
 
     fn build_plans<'a>(
         messages: &'a [MessageDef],
         formatted_keys: &BTreeSet<String>,
+        cow_macro_output: bool,
     ) -> Result<Vec<MessagePlan<'a>>, String> {
         let mut macro_names = BTreeSet::new();
         let mut plans = Vec::with_capacity(messages.len());
@@ -64,6 +94,7 @@ impl MessageEmitter {
                 message,
                 needs_formatter: formatted_keys.contains(&key),
                 macro_name,
+                cow_macro_output,
             });
         }
         Ok(plans)
@@ -147,8 +178,8 @@ impl MessageEmitter {
         writeln!(output, "        ::u18n::__invoke_message! {{")?;
         writeln!(
             output,
-            "            [{}, [{}]]",
-            plan.needs_formatter, parameters
+            "            [{}, {}, [{}]]",
+            plan.needs_formatter, plan.cow_macro_output, parameters
         )?;
         writeln!(output, "            {{ {locale} }}")?;
         writeln!(

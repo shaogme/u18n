@@ -21,6 +21,7 @@ pub(super) struct Arguments {
     source_locale: Option<String>,
     atomic_locale: bool,
     locale_tag_fallback: bool,
+    cow_macro_output: bool,
     final_fallback_locale: Option<String>,
     render_error_fallback_message: Option<String>,
 }
@@ -56,6 +57,10 @@ impl Arguments {
 
     pub(super) fn locale_tag_fallback(&self) -> bool {
         self.locale_tag_fallback
+    }
+
+    pub(super) fn cow_macro_output(&self) -> bool {
+        self.cow_macro_output
     }
 
     pub(super) fn final_fallback_locale(&self) -> Option<&str> {
@@ -98,6 +103,8 @@ impl ArgumentsParser {
         let mut atomic_seen = false;
         let mut locale_tag_fallback = false;
         let mut locale_tag_fallback_seen = false;
+        let mut cow_macro_output = false;
+        let mut cow_macro_output_seen = false;
         let mut final_fallback_locale = None;
         let mut render_error_fallback_message = None;
         while let Some(option) = values.next() {
@@ -127,6 +134,16 @@ impl ArgumentsParser {
                     }
                     locale_tag_fallback_seen = true;
                     locale_tag_fallback = true;
+                }
+                "--cow-macro-output" => {
+                    if command != Command::Compile {
+                        return Err("--cow-macro-output is only valid for compile".to_string());
+                    }
+                    if cow_macro_output_seen {
+                        return Err("duplicate --cow-macro-output option".to_string());
+                    }
+                    cow_macro_output_seen = true;
+                    cow_macro_output = true;
                 }
                 "--final-fallback" => {
                     if command != Command::Compile {
@@ -210,6 +227,7 @@ impl ArgumentsParser {
             source_locale,
             atomic_locale,
             locale_tag_fallback,
+            cow_macro_output,
             final_fallback_locale,
             render_error_fallback_message,
         }))
@@ -226,6 +244,6 @@ impl ArgumentsParser {
     }
 
     fn usage() -> String {
-        "usage: u18n-cli compile --schema FILE --locale FILE... [--locale-tag-fallback] [--atomic --final-fallback TAG] [--render-error-fallback-message TEXT] [--output FILE] [--pool-limit N]\n       --locale-tag-fallback, --atomic, --final-fallback, and --render-error-fallback-message are only valid for compile\n       --final-fallback requires --atomic and must name an input locale catalog\n       u18n-cli extract --schema FILE --locale FILE... --source-locale TAG [--output FILE]\n       u18n-cli coverage --schema FILE --locale FILE... [--output FILE]\n       u18n-cli --help".to_string()
+        "usage: u18n-cli compile --schema FILE --locale FILE... [--locale-tag-fallback] [--cow-macro-output] [--atomic --final-fallback TAG] [--render-error-fallback-message TEXT] [--output FILE] [--pool-limit N]\n       --locale-tag-fallback, --cow-macro-output, --atomic, --final-fallback, and --render-error-fallback-message are only valid for compile\n       --final-fallback requires --atomic and must name an input locale catalog\n       u18n-cli extract --schema FILE --locale FILE... --source-locale TAG [--output FILE]\n       u18n-cli coverage --schema FILE --locale FILE... [--output FILE]\n       u18n-cli --help".to_string()
     }
 }

@@ -20,7 +20,7 @@ use crate::{
 };
 
 use locale_tag::LocaleTagEmitter;
-use messages::MessageEmitter;
+use messages::{MessageEmissionOptions, MessageEmitter};
 
 use super::{
     GenerationConfig,
@@ -61,8 +61,14 @@ impl SourceEmitter {
             &mut module_source,
             &input.catalog.messages,
             input.formatted_keys,
-            input.generation.atomic_locale,
-            input.generation.render_error_fallback_message.is_some(),
+            MessageEmissionOptions {
+                atomic_locale: input.generation.atomic_locale,
+                render_error_fallback_enabled: input
+                    .generation
+                    .render_error_fallback_message
+                    .is_some(),
+                cow_macro_output: input.generation.cow_macro_output,
+            },
         )?;
         Self::emit_catalogs(
             &mut module_source,
@@ -85,8 +91,12 @@ impl SourceEmitter {
             Self::emit_atomic_locale_api(&mut module_source, input.locales, final_fallback)
                 .map_err(|_| "could not format generated source".to_string())?;
         }
-        Self::emit_translation_macro(&mut module_source, input.generation)
-            .map_err(|_| "could not format generated source".to_string())?;
+        MessageEmitter::emit_translation_macro(
+            &mut module_source,
+            input.generation.atomic_locale,
+            input.generation.render_error_fallback_message,
+        )
+        .map_err(|_| "could not format generated source".to_string())?;
         let mut output = String::new();
         Self::emit_header(&mut output, &input)
             .map_err(|_| "could not format generated source".to_string())?;
@@ -131,6 +141,11 @@ impl SourceEmitter {
             output,
             "// locale-tag-fallback-generation={}",
             input.generation.locale_tag_fallback
+        )?;
+        writeln!(
+            output,
+            "// cow-macro-output={}",
+            input.generation.cow_macro_output
         )?;
         writeln!(
             output,
@@ -334,30 +349,6 @@ impl SourceEmitter {
         }
         writeln!(output, "        _ => FINAL_FALLBACK_CATALOG,")?;
         writeln!(output, "    }}")?;
-        writeln!(output, "}}")?;
-        Ok(())
-    }
-
-    fn emit_translation_macro(
-        output: &mut String,
-        generation: GenerationConfig<'_>,
-    ) -> Result<(), FmtError> {
-        let fallback = generation
-            .render_error_fallback_message
-            .map_or_else(String::new, |message| format!(", {message:?}"));
-        writeln!(
-            output,
-            "/// Dispatches a literal message key to its generated, schema-checked message macro."
-        )?;
-        writeln!(output, "#[macro_export]")?;
-        writeln!(output, "macro_rules! t {{")?;
-        writeln!(output, "    ($key:literal $(, $($arguments:tt)*)?) => {{")?;
-        writeln!(
-            output,
-            "        ::u18n::__dispatch_translation!($key, {}, [$crate]{fallback}; $($($arguments)*)?)",
-            generation.atomic_locale
-        )?;
-        writeln!(output, "    }};")?;
         writeln!(output, "}}")?;
         Ok(())
     }

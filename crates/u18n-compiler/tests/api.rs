@@ -14,6 +14,12 @@ fn input_fingerprint(source: &str) -> Option<&str> {
 
 #[test]
 fn compiles_named_in_memory_sources_and_reports_pool_statistics() {
+    assert!(!CompilerOptions::default().cow_macro_output());
+    assert!(
+        CompilerOptions::default()
+            .with_cow_macro_output(true)
+            .cow_macro_output()
+    );
     assert!(!CompilerOptions::default().locale_tag_fallback());
     assert!(
         CompilerOptions::default()
@@ -72,7 +78,7 @@ fn compiles_named_in_memory_sources_and_reports_pool_statistics() {
     assert!(generated.source().contains("pool-limit=256"));
     assert_eq!(
         input_fingerprint(generated.source()),
-        Some("41d01924d2ce5232119625d4ee7b1a6b716ff3d48b9d27a397e5299ac6b3b827")
+        Some("dd5690dc184109d8472ce692194e08ed0bd66c4fe4d52cf5a85970a129b2d988")
     );
     assert!(!generated.source().contains("AtomicPtr<Catalog>"));
     assert!(generated.pool_statistics().literal_fragments() > 0);
@@ -720,6 +726,12 @@ fn fingerprints_cover_atomic_fallback_and_pool_generation_options() {
                 locale_sources(),
             ))
             .expect("locale tag fallback generation should succeed");
+    let cow_macro_output = Compiler::new(CompilerOptions::default().with_cow_macro_output(true))
+        .compile(CompilationInput::new(
+            SourceFile::new(schema.name(), schema.contents()),
+            locale_sources(),
+        ))
+        .expect("Cow macro output generation should succeed");
 
     let default_fingerprint =
         input_fingerprint(default.source()).expect("default fingerprint should be emitted");
@@ -731,6 +743,11 @@ fn fingerprints_cover_atomic_fallback_and_pool_generation_options() {
         default_fingerprint,
         input_fingerprint(locale_tag_fallback.source())
             .expect("locale tag fallback fingerprint should be emitted")
+    );
+    assert_ne!(
+        default_fingerprint,
+        input_fingerprint(cow_macro_output.source())
+            .expect("Cow macro output fingerprint should be emitted")
     );
     assert_ne!(
         default_fingerprint,
@@ -747,6 +764,44 @@ fn fingerprints_cover_atomic_fallback_and_pool_generation_options() {
             .source()
             .contains("locale-tag-fallback-generation=true")
     );
+    assert!(default.source().contains("// cow-macro-output=false"));
+    assert!(
+        cow_macro_output
+            .source()
+            .contains("// output-format-version=3")
+    );
+    assert!(
+        cow_macro_output
+            .source()
+            .contains("// cow-macro-output=true")
+    );
+}
+
+#[test]
+fn cow_macro_output_is_encoded_in_generated_invocation_metadata() {
+    let schema = "schema 1; message app.title(); message app.greeting(name: string);";
+    let locale =
+        "locale en; message app.title = \"Title\"; message app.greeting = \"Hello {name}\";";
+    let compile = |cow_macro_output| {
+        Compiler::new(CompilerOptions::default().with_cow_macro_output(cow_macro_output))
+            .compile(CompilationInput::new(
+                SourceFile::new("schema.u18n", schema),
+                vec![SourceFile::new("locales/en.u18n", locale)],
+            ))
+            .expect("valid macro signatures should compile")
+    };
+
+    let default = compile(false);
+    let cow = compile(true);
+
+    assert!(default.source().contains("[false, false, []]"));
+    assert!(
+        default
+            .source()
+            .contains("[false, false, [(name, string)]]")
+    );
+    assert!(cow.source().contains("[false, true, []]"));
+    assert!(cow.source().contains("[false, true, [(name, string)]]"));
 }
 
 #[test]

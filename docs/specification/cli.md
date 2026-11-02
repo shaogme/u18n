@@ -9,7 +9,7 @@ API; see [Schema AST](schema-ast.md), [Locale AST](locale-ast.md), and
 
 ```text
 u18n-cli compile  --schema FILE --locale FILE... [--output FILE] [--pool-limit N]
-                  [--locale-tag-fallback] [--atomic --final-fallback TAG]
+                  [--locale-tag-fallback] [--cow-macro-output] [--atomic --final-fallback TAG]
                   [--render-error-fallback-message TEXT]
 u18n-cli extract  --schema FILE --locale FILE... --source-locale TAG [--output FILE]
 u18n-cli coverage --schema FILE --locale FILE... [--output FILE]
@@ -21,9 +21,9 @@ each locale source file. Input files are read as UTF-8. The CLI sorts locale pat
 canonicalized path before reading them, using the supplied path if canonicalization fails. Locale
 identity and explicit message-fallback matching use the complete, case-sensitive source tag declared
 in each file. Repeated `--schema`, `--output`, `--pool-limit`, and `--source-locale` options use the
-last value; duplicate `--atomic`, `--locale-tag-fallback`, `--final-fallback`, and
-`--render-error-fallback-message` options are errors. `--locale-tag-fallback` is valid only for
-`compile` and is disabled by default.
+last value; duplicate `--atomic`, `--locale-tag-fallback`, `--cow-macro-output`, `--final-fallback`,
+and `--render-error-fallback-message` options are errors. `--locale-tag-fallback` and
+`--cow-macro-output` are valid only for `compile` and are disabled by default.
 
 `--pool-limit N` is parsed by all commands but only affects `compile`; `extract` and `coverage` use
 their default compiler options.
@@ -50,6 +50,19 @@ every input locale. See [Schema AST](schema-ast.md) for generated message macros
 `--final-fallback`; exact `FromStr` lookup remains available without it. Generated metadata records
 `locale-tag-fallback-generation=true|false`, and the setting changes the fingerprint while keeping
 the hash domain and output-format version at `v3` and `3`.
+
+Pass `--cow-macro-output` to make generated `m_*` and `t!` calls use the public
+`RenderedMessage` alias for `Cow<'static, str>`. `m_*` and `t!` without a fixed fallback return
+`Result<RenderedMessage, RenderError>`; `t!` with a fixed fallback returns `RenderedMessage`
+directly. Zero-argument messages return `Cow::Borrowed`, and parameterized messages return
+`Cow::Owned`. A configured fixed render-error fallback returns `Cow::Borrowed` lazily. The option
+changes the generated API at compile time and is omitted by default. Metadata records
+`cow-macro-output=true|false`, and the setting changes the fingerprint without changing the hash
+domain (`u18n-catalog-input-v3`) or output-format version (`3`).
+
+```sh
+u18n-cli compile --schema schema.u18n --locale locales/en.u18n --cow-macro-output
+```
 
 ```sh
 u18n-cli compile \

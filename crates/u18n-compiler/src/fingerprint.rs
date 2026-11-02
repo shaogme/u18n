@@ -93,6 +93,15 @@ impl Fingerprint {
         );
         Self::field(
             &mut hash,
+            "cow-macro-output",
+            if generation.cow_macro_output {
+                b"true"
+            } else {
+                b"false"
+            },
+        );
+        Self::field(
+            &mut hash,
             "final-fallback-locale",
             generation
                 .final_fallback_locale
@@ -316,6 +325,7 @@ mod tests {
                     pool_limit: 256,
                     atomic_locale: false,
                     locale_tag_fallback: false,
+                    cow_macro_output: false,
                     final_fallback_locale: None,
                     render_error_fallback_message: None,
                 },

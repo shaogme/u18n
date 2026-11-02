@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.1]
+
+### Added
+
+- Added opt-in `Cow<'static, str>` results for generated keyed macros with
+  `CompilerOptions::with_cow_macro_output(true)` or `u18n-cli compile --cow-macro-output`. The
+  public `RenderedMessage` alias represents the result: zero-argument messages and fixed `t!`
+  fallbacks are borrowed, while parameterized messages are owned. The default macro return types
+  remain unchanged.
+
+### Changed
+
+- Generated metadata and the input fingerprint now record the Cow macro-output setting. The
+  fingerprint domain and generated output-format version remain `v3` and `3`.
+
 ## [0.3.0]
 
 ### Added

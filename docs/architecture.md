@@ -83,10 +83,11 @@ the showcase does. Compilation proceeds through these stages:
    discriminant in the low three bits. The enum supplies the canonical parent tag after lookup.
    The default build omits this index and `LocaleTag::fallback`; Rust callers opt in with
    `CompilerOptions::with_locale_tag_fallback(true)`, and CLI callers use `--locale-tag-fallback`.
-   The `t!` dispatcher is emitted alongside them. The fingerprint hashes source inputs, generation
-   options, output-format version (`3`), and all pinned locale-data digests. The supplemental
-   digest remains part of the fingerprint in either mode because plural-rule lookup also uses
-   data from that file.
+   The compiler can also select a uniform `Cow<'static, str>` result for keyed macros with
+   `CompilerOptions::with_cow_macro_output(true)` or CLI `--cow-macro-output`. The `t!` dispatcher
+   is emitted alongside them. The fingerprint hashes source inputs, generation options,
+   output-format version (`3`), and all pinned locale-data digests. The supplemental digest remains
+   part of the fingerprint in either mode because plural-rule lookup also uses data from that file.
 
 The semantic compiler is divided into schema linking, pattern linking, fallback resolution, CLDR
 lookup, and code generation. Diagnostics preserve source spans and can include related spans in
@@ -104,13 +105,18 @@ can implement it for their own locale types. `LocaleTag::as_locale()` and
 callers use `LocaleTag::as_catalog()` or `catalogs::locale_<tag>::CATALOG`. The generated enum and
 its lookup behavior are described in [Locale identity](policy.md#locale-identity).
 
-Zero-argument key macros return `Result<&'static str, RenderError>` from preflattened program text;
-messages with schema arguments return `Result<String, RenderError>`. Dynamic `Catalog::render`
-returns `Result<RenderedMessage, RenderError>`, where `RenderedMessage` is borrowed for
-zero-argument messages and owned for parameterized messages. Call `into_owned()` when dynamic
-callers need a `String` in both cases. If `CompilerOptions` configures a render-error fallback,
-`t!` converts render errors to that fixed text and returns `&'static str` or `String` according to
-the message signature. The `m_*` macros and runtime rendering APIs retain their `Result` values.
+By default, zero-argument key macros return `Result<&'static str, RenderError>` from preflattened
+program text, and messages with schema arguments return `Result<String, RenderError>`. A build can
+select `CompilerOptions::with_cow_macro_output(true)` to make both `m_*` and `t!` calls return
+`Result<RenderedMessage, RenderError>` when `t!` has no fixed fallback, where `RenderedMessage` is
+the public alias for `Cow<'static, str>`. Static text remains `Borrowed`, and parameterized output
+remains `Owned`.
+Dynamic `Catalog::render` returns the same `RenderedMessage` behavior regardless of the keyed macro
+option. Call `into_owned()` when callers need a `String` in both cases. A configured render-error
+fallback makes `t!` return the selected success type directly: with Cow output it returns
+`RenderedMessage` and lazily converts the fixed fallback to `Cow::Borrowed`; without it the default
+return type follows the message signature. The option is selected at compile time and does not
+change dynamic or streaming APIs.
 
 ### Generated message calls
 

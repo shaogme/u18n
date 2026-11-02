@@ -10,6 +10,6 @@ Run it with:
 cargo run -p u18n-result-api-example
 ```
 
-The explicit type annotations in `src/main.rs` demonstrate the success types: `&'static str` for a
-zero-argument message and `String` for a parameterized message. The compiler errors remain available
-as `u18n::RenderError` through the returned `Result`.
+The explicit type annotations in `src/main.rs` demonstrate the default success types: `&'static str`
+for a zero-argument message and `String` for a parameterized message. The compiler errors remain
+available as `u18n::RenderError` through the returned `Result`.

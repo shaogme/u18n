@@ -10,6 +10,9 @@ translation files or message patterns.
 ## Features
 
 - Generated per-message macros check argument names, arity, and Rust types.
+- Keyed macros can opt into a consistent `RenderedMessage` (`Cow<'static, str>`) result with
+  `CompilerOptions::with_cow_macro_output(true)` or `--cow-macro-output`, borrowed for static text
+  and owned for parameterized output.
 - Cardinal and ordinal selectors use pinned CLDR 49 rules. Exact-scale decimal counts preserve
   visible fractional digits such as `1`, `1.0`, and `1.00`.
 - Locale files declare explicit fallback chains. Each inherited message comes from one complete
@@ -28,10 +31,10 @@ Add the runtime and build-time compiler to your application:
 
 ```toml
 [dependencies]
-u18n = "0.3.0"
+u18n = "0.3.1"
 
 [build-dependencies]
-u18n-compiler = "0.3.0"
+u18n-compiler = "0.3.1"
 ```
 
 Create `schema.u18n`:
