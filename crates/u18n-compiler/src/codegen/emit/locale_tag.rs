@@ -29,12 +29,16 @@ struct ParentLocaleSpec {
     discriminant: u8,
 }
 
-struct PreparedLocaleTags {
-    variants: Vec<String>,
-    locale_index: Vec<LocaleIndexRecord>,
+struct PreparedLocaleTagFallback {
     parent_variants: Vec<ParentLocaleVariant>,
     parent_index: Vec<ParentIndexRecord>,
     default_variant: String,
+}
+
+struct PreparedLocaleTags {
+    variants: Vec<String>,
+    locale_index: Vec<LocaleIndexRecord>,
+    fallback: Option<PreparedLocaleTagFallback>,
 }
 
 const CLDR_MAIN_PARENT_CHILD_COUNT: usize = 198;
@@ -90,29 +94,38 @@ impl LocaleTagEmitter {
         output: &mut String,
         locales: &[LoweredLocale],
         main_parents: &BTreeMap<String, String>,
+        locale_tag_fallback: bool,
     ) -> Result<(), String> {
-        let prepared = Self::prepare(locales, main_parents)?;
-        Self::emit_prepared(output, locales, &prepared)
+        let prepared = Self::prepare(locales, main_parents, locale_tag_fallback)?;
+        Self::emit_prepared(output, locales, &prepared, locale_tag_fallback)
             .map_err(|_| "could not format generated locale tag source".to_string())
     }
 
     fn prepare(
         locales: &[LoweredLocale],
         main_parents: &BTreeMap<String, String>,
+        locale_tag_fallback: bool,
     ) -> Result<PreparedLocaleTags, String> {
         let variants = Self::locale_variants(locales)?;
         let locale_index = Self::locale_index(locales, &variants)?;
-        Self::validate_main_parent_data(main_parents)?;
-        let (parent_variants, parent_index) = Self::parent_index(main_parents)?;
-        let default_variant = Self::default_variant(locales, &variants)
-            .ok_or_else(|| "generated locale set is empty".to_string())?
-            .to_string();
+        let fallback = if locale_tag_fallback {
+            Self::validate_main_parent_data(main_parents)?;
+            let (parent_variants, parent_index) = Self::parent_index(main_parents)?;
+            let default_variant = Self::default_variant(locales, &variants)
+                .ok_or_else(|| "generated locale set is empty".to_string())?
+                .to_string();
+            Some(PreparedLocaleTagFallback {
+                parent_variants,
+                parent_index,
+                default_variant,
+            })
+        } else {
+            None
+        };
         Ok(PreparedLocaleTags {
             variants,
             locale_index,
-            parent_variants,
-            parent_index,
-            default_variant,
+            fallback,
         })
     }
 
@@ -120,6 +133,7 @@ impl LocaleTagEmitter {
         output: &mut String,
         locales: &[LoweredLocale],
         prepared: &PreparedLocaleTags,
+        locale_tag_fallback: bool,
     ) -> Result<(), FmtError> {
         writeln!(output)?;
         writeln!(output, "#[derive(Clone, Copy, Debug, Eq, PartialEq)]")?;
@@ -134,37 +148,56 @@ impl LocaleTagEmitter {
         }
         writeln!(output, "}}")?;
         writeln!(output)?;
-        writeln!(
-            output,
-            "const PARENT_LOCALE_BITS: u32 = {PARENT_LOCALE_BITS};"
-        )?;
-        writeln!(
-            output,
-            "const PARENT_LOCALE_MASK: u64 = (1 << PARENT_LOCALE_BITS) - 1;"
-        )?;
-        writeln!(output)?;
         writeln!(output, "struct LocaleIndexEntry {{")?;
         writeln!(output, "    tag: &'static str,")?;
         writeln!(output, "    locale: LocaleTag,")?;
         writeln!(output, "}}")?;
         writeln!(output)?;
-        Self::emit_parent_locale(output, &prepared.parent_variants)?;
-        writeln!(output)?;
-        writeln!(output, "struct ParentIndexEntry {{")?;
-        writeln!(output, "    key: u64,")?;
-        writeln!(output, "}}")?;
-        writeln!(output)?;
         Self::emit_locale_index(output, &prepared.locale_index)?;
-        Self::emit_parent_index(output, &prepared.parent_index)?;
+        if locale_tag_fallback {
+            let fallback = prepared.fallback.as_ref().ok_or(FmtError)?;
+            writeln!(output)?;
+            writeln!(
+                output,
+                "const PARENT_LOCALE_BITS: u32 = {PARENT_LOCALE_BITS};"
+            )?;
+            writeln!(
+                output,
+                "const PARENT_LOCALE_MASK: u64 = (1 << PARENT_LOCALE_BITS) - 1;"
+            )?;
+            writeln!(output)?;
+            Self::emit_parent_locale(output, &fallback.parent_variants)?;
+            writeln!(output)?;
+            writeln!(output, "struct ParentIndexEntry {{")?;
+            writeln!(output, "    key: u64,")?;
+            writeln!(output, "}}")?;
+            writeln!(output)?;
+            Self::emit_parent_index(output, &fallback.parent_index)?;
+        }
         writeln!(output)?;
         Self::emit_locale_tag_methods(
             output,
             locales,
             &prepared.variants,
-            &prepared.default_variant,
+            locale_tag_fallback,
+            prepared
+                .fallback
+                .as_ref()
+                .map(|fallback| fallback.default_variant.as_str()),
         )?;
         writeln!(output)?;
+        Self::emit_locale_provider_impl(output)?;
+        writeln!(output)?;
         Self::emit_locale_tag_parser(output)?;
+        Ok(())
+    }
+
+    fn emit_locale_provider_impl(output: &mut String) -> Result<(), FmtError> {
+        writeln!(output, "impl LocaleProvider for LocaleTag {{")?;
+        writeln!(output, "    fn provide_locale(&self) -> &Locale {{")?;
+        writeln!(output, "        self.as_locale()")?;
+        writeln!(output, "    }}")?;
+        writeln!(output, "}}")?;
         Ok(())
     }
 
@@ -445,7 +478,8 @@ impl LocaleTagEmitter {
         output: &mut String,
         locales: &[LoweredLocale],
         variants: &[String],
-        default_variant: &str,
+        locale_tag_fallback: bool,
+        default_variant: Option<&str>,
     ) -> Result<(), FmtError> {
         if locales.len() != variants.len() {
             return Err(FmtError);
@@ -528,12 +562,16 @@ impl LocaleTagEmitter {
         writeln!(output, "        }}")?;
         writeln!(output, "    }}")?;
         writeln!(output)?;
-        Self::emit_lookup_methods(output, default_variant)?;
+        Self::emit_lookup_methods(output, locale_tag_fallback, default_variant)?;
         writeln!(output, "}}")?;
         Ok(())
     }
 
-    fn emit_lookup_methods(output: &mut String, default_variant: &str) -> Result<(), FmtError> {
+    fn emit_lookup_methods(
+        output: &mut String,
+        locale_tag_fallback: bool,
+        default_variant: Option<&str>,
+    ) -> Result<(), FmtError> {
         writeln!(
             output,
             "    fn find_source_locale(tag: &ParsedTag<'_>) -> Option<Self> {{"
@@ -549,69 +587,72 @@ impl LocaleTagEmitter {
         )?;
         writeln!(output, "            .map(|entry| entry.locale)")?;
         writeln!(output, "    }}")?;
-        writeln!(output)?;
-        writeln!(
-            output,
-            "    fn cldr_parent(tag: &ParsedTag<'_>) -> Option<ParentLocale> {{"
-        )?;
-        writeln!(output, "        let child_key = tag.semantic_code()?;")?;
-        writeln!(output, "        let position = PARENT_INDEX")?;
-        writeln!(
-            output,
-            "            .binary_search_by_key(&child_key, |entry| entry.key >> PARENT_LOCALE_BITS)"
-        )?;
-        writeln!(output, "            .ok()?;")?;
-        writeln!(output, "        let entry = PARENT_INDEX.get(position)?;")?;
-        writeln!(
-            output,
-            "        ParentLocale::from_discriminant(entry.key & PARENT_LOCALE_MASK)"
-        )?;
-        writeln!(output, "    }}")?;
-        writeln!(output)?;
-        writeln!(
-            output,
-            "    /// Resolves an unsupported or regional tag through generated locale fallbacks."
-        )?;
-        writeln!(
-            output,
-            "    pub fn fallback(locale_tag: &str) -> Result<Self, &'static str> {{"
-        )?;
-        writeln!(
-            output,
-            "        let mut candidate = ParsedTag::parse(locale_tag)"
-        )?;
-        writeln!(
-            output,
-            "            .map_err(|_| \"invalid or policy-rejected BCP 47 locale tag\")?;"
-        )?;
-        writeln!(output, "        loop {{")?;
-        writeln!(
-            output,
-            "            if let Some(locale) = Self::find_source_locale(&candidate) {{"
-        )?;
-        writeln!(output, "                return Ok(locale);")?;
-        writeln!(output, "            }}")?;
-        writeln!(output, "            if candidate.is_grandfathered() {{")?;
-        writeln!(output, "                break;")?;
-        writeln!(output, "            }}")?;
-        writeln!(
-            output,
-            "            if let Some(parent) = Self::cldr_parent(&candidate).and_then(|parent| ParsedTag::parse(parent.as_str()).ok()) {{"
-        )?;
-        writeln!(output, "                candidate = parent;")?;
-        writeln!(output, "                continue;")?;
-        writeln!(output, "            }}")?;
-        writeln!(
-            output,
-            "            if let Some(prefix) = candidate.truncate().and_then(|prefix| ParsedTag::parse(prefix).ok()) {{"
-        )?;
-        writeln!(output, "                candidate = prefix;")?;
-        writeln!(output, "                continue;")?;
-        writeln!(output, "            }}")?;
-        writeln!(output, "            break;")?;
-        writeln!(output, "        }}")?;
-        writeln!(output, "        Ok(Self::{default_variant})")?;
-        writeln!(output, "    }}")?;
+        if locale_tag_fallback {
+            let default_variant = default_variant.ok_or(FmtError)?;
+            writeln!(output)?;
+            writeln!(
+                output,
+                "    fn cldr_parent(tag: &ParsedTag<'_>) -> Option<ParentLocale> {{"
+            )?;
+            writeln!(output, "        let child_key = tag.semantic_code()?;")?;
+            writeln!(output, "        let position = PARENT_INDEX")?;
+            writeln!(
+                output,
+                "            .binary_search_by_key(&child_key, |entry| entry.key >> PARENT_LOCALE_BITS)"
+            )?;
+            writeln!(output, "            .ok()?;")?;
+            writeln!(output, "        let entry = PARENT_INDEX.get(position)?;")?;
+            writeln!(
+                output,
+                "        ParentLocale::from_discriminant(entry.key & PARENT_LOCALE_MASK)"
+            )?;
+            writeln!(output, "    }}")?;
+            writeln!(output)?;
+            writeln!(
+                output,
+                "    /// Resolves an unsupported or regional tag through generated locale fallbacks."
+            )?;
+            writeln!(
+                output,
+                "    pub fn fallback(locale_tag: &str) -> Result<Self, &'static str> {{"
+            )?;
+            writeln!(
+                output,
+                "        let mut candidate = ParsedTag::parse(locale_tag)"
+            )?;
+            writeln!(
+                output,
+                "            .map_err(|_| \"invalid or policy-rejected BCP 47 locale tag\")?;"
+            )?;
+            writeln!(output, "        loop {{")?;
+            writeln!(
+                output,
+                "            if let Some(locale) = Self::find_source_locale(&candidate) {{"
+            )?;
+            writeln!(output, "                return Ok(locale);")?;
+            writeln!(output, "            }}")?;
+            writeln!(output, "            if candidate.is_grandfathered() {{")?;
+            writeln!(output, "                break;")?;
+            writeln!(output, "            }}")?;
+            writeln!(
+                output,
+                "            if let Some(parent) = Self::cldr_parent(&candidate).and_then(|parent| ParsedTag::parse(parent.as_str()).ok()) {{"
+            )?;
+            writeln!(output, "                candidate = parent;")?;
+            writeln!(output, "                continue;")?;
+            writeln!(output, "            }}")?;
+            writeln!(
+                output,
+                "            if let Some(prefix) = candidate.truncate().and_then(|prefix| ParsedTag::parse(prefix).ok()) {{"
+            )?;
+            writeln!(output, "                candidate = prefix;")?;
+            writeln!(output, "                continue;")?;
+            writeln!(output, "            }}")?;
+            writeln!(output, "            break;")?;
+            writeln!(output, "        }}")?;
+            writeln!(output, "        Ok(Self::{default_variant})")?;
+            writeln!(output, "    }}")?;
+        }
         Ok(())
     }
 
@@ -684,6 +725,15 @@ mod tests {
             error,
             "generated LocaleTag variant `En12` collides for `en-1-2` and `en-12`"
         );
+    }
+
+    #[test]
+    fn disabled_fallback_does_not_prepare_parent_index_data() {
+        let locales = [lowered_locale("en")];
+        let prepared = LocaleTagEmitter::prepare(&locales, &BTreeMap::new(), false)
+            .expect("disabled fallback must not validate or construct parent data");
+
+        assert!(prepared.fallback.is_none());
     }
 
     #[test]

@@ -8,7 +8,9 @@ API; see [Schema AST](schema-ast.md), [Locale AST](locale-ast.md), and
 ## Invocation
 
 ```text
-u18n-cli compile  --schema FILE --locale FILE... [--output FILE] [--pool-limit N] [--atomic --final-fallback TAG]
+u18n-cli compile  --schema FILE --locale FILE... [--output FILE] [--pool-limit N]
+                  [--locale-tag-fallback] [--atomic --final-fallback TAG]
+                  [--render-error-fallback-message TEXT]
 u18n-cli extract  --schema FILE --locale FILE... --source-locale TAG [--output FILE]
 u18n-cli coverage --schema FILE --locale FILE... [--output FILE]
 u18n-cli --help
@@ -19,7 +21,9 @@ each locale source file. Input files are read as UTF-8. The CLI sorts locale pat
 canonicalized path before reading them, using the supplied path if canonicalization fails. Locale
 identity and explicit message-fallback matching use the complete, case-sensitive source tag declared
 in each file. Repeated `--schema`, `--output`, `--pool-limit`, and `--source-locale` options use the
-last value; duplicate `--atomic` and `--final-fallback` options are errors.
+last value; duplicate `--atomic`, `--locale-tag-fallback`, `--final-fallback`, and
+`--render-error-fallback-message` options are errors. `--locale-tag-fallback` is valid only for
+`compile` and is disabled by default.
 
 `--pool-limit N` is parsed by all commands but only affects `compile`; `extract` and `coverage` use
 their default compiler options.
@@ -41,6 +45,12 @@ explicit fallback chain, and writes generated Rust source. Every schema message 
 every input locale. See [Schema AST](schema-ast.md) for generated message macros and
 [Architecture](../architecture.md) for the generated catalog API.
 
+`LocaleTag::fallback` and its CLDR main-parent lookup data are omitted by default. Pass
+`--locale-tag-fallback` to generate them. This option is independent of `--atomic` and
+`--final-fallback`; exact `FromStr` lookup remains available without it. Generated metadata records
+`locale-tag-fallback-generation=true|false`, and the setting changes the fingerprint while keeping
+the hash domain and output-format version at `v3` and `3`.
+
 ```sh
 u18n-cli compile \
   --schema schema.u18n \
@@ -61,6 +71,12 @@ On success, the compiler writes separate statistics for the dynamic shared pool 
 keyed-shard pools to standard error. Keyed totals count the same fragment once for each shard that
 owns it and report how many per-key pools used overlap optimization.
 
+`--render-error-fallback-message TEXT` configures a fixed fallback for rendering errors returned
+through generated `t!` calls. The text is read as UTF-8 and may be empty or contain whitespace,
+quotes, backslashes, and line breaks. It does not affect generated `m_*` macros or dynamic and
+streaming runtime APIs, which continue to return `Result<_, RenderError>`. The option is valid only
+for `compile`.
+
 ### Atomic locale selection
 
 `--atomic` enables generated atomic current-locale selection for keyed message macros. It must be
@@ -75,6 +91,7 @@ u18n-cli compile \
   --schema schema.u18n \
   --locale locales/en.u18n \
   --locale locales/fr.u18n \
+  --locale-tag-fallback \
   --atomic \
   --final-fallback en
 ```
@@ -150,11 +167,11 @@ The CLI delegates parsing and validation to `u18n-compiler`. Schema and locale s
 linked specifications. In particular, fallbacks must name input locales and cannot form cycles; the
 shared locale-tag parser checks BCP 47 structure and extension policy, while the compiler checks
 source casing, registration against pinned IANA data, and plural rules from CLDR. Generated
-source-locale lookup uses a case-insensitive lexical index. Each separate CLDR main-parent index row
-stores one numeric `u64` key: the semantic language, script, and region code shifted left three bits,
-with the fixed private `ParentLocale` discriminant in the low three bits. Rows sort by child code;
-the enum selects the canonical tag after lookup. Valid request tags outside that semantic profile
-skip parent lookup and continue through structural truncation. Source tags and explicit fallback
-targets retain their authored spelling. The source-locale index remains string-based and has no
-parent-code width limit.
+source-locale lookup uses a case-insensitive lexical index. With `--locale-tag-fallback`, each CLDR
+main-parent index row stores one numeric `u64` key: the semantic language, script, and region code
+shifted left three bits, with the fixed private `ParentLocale` discriminant in the low three bits.
+Rows sort by child code; the enum selects the canonical tag after lookup. Valid request tags outside
+that semantic profile skip parent lookup and continue through structural truncation. Source tags
+and explicit fallback targets retain their authored spelling. The source-locale index remains
+string-based and has no parent-code width limit.
 `compile` and `extract` reject incomplete resolved catalogs, while `coverage` reports those gaps.

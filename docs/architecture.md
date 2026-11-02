@@ -58,7 +58,7 @@ the showcase does. Compilation proceeds through these stages:
    snapshot and CLDR 49 plural, ordinal, alias, and supplemental data. It verifies expected
    SHA-256 digests before using the data. Locale source spelling remains the catalog
    identity. Plural-component parent lookup finds rule sets, while the separate
-   main-component parent map supplies the generated runtime catalog-selection helper.
+   main-component parent map supplies the optional generated runtime catalog-selection helper.
 3. **Validate and link.** The schema defines unique message keys, parameter names, types, and
    argument order. The compiler checks locale keys and selector/format uses against those
    definitions, assigns each referenced parameter a schema-order slot, validates plural
@@ -76,14 +76,17 @@ the showcase does. Compilation proceeds through these stages:
 5. **Emit.** The compiler writes one shared static program store for dynamic IDs, independent
    lightweight locale handles and full `Catalog` views, and one keyed static shard per schema key.
    It also emits generated message macros, a closed `LocaleTag` enum with one variant per source
-   locale, a case-insensitive string-sorted source-locale index, and a
-   numerically sorted `u64` binary-search index for CLDR main parents. Each parent row stores one
-   packed key: the child semantic code shifted left three bits, with the fixed private
-   `ParentLocale` discriminant in the low three bits. The enum supplies the canonical parent tag
-   after lookup. The `t!` dispatcher is emitted alongside them. The fingerprint hashes source inputs,
-   generation options, output-format version (`2`), and all pinned locale-data digests, including
-   cardinal rules and aliases used for plural resolution and supplemental data used by runtime
-   locale fallback.
+   locale and a case-insensitive string-sorted source-locale index. These exact lookup APIs are
+   always emitted. When locale-tag fallback generation is enabled, it also emits a numerically
+   sorted `u64` binary-search index for CLDR main parents. Each parent row stores one packed key:
+   the child semantic code shifted left three bits, with the fixed private `ParentLocale`
+   discriminant in the low three bits. The enum supplies the canonical parent tag after lookup.
+   The default build omits this index and `LocaleTag::fallback`; Rust callers opt in with
+   `CompilerOptions::with_locale_tag_fallback(true)`, and CLI callers use `--locale-tag-fallback`.
+   The `t!` dispatcher is emitted alongside them. The fingerprint hashes source inputs, generation
+   options, output-format version (`3`), and all pinned locale-data digests. The supplemental
+   digest remains part of the fingerprint in either mode because plural-rule lookup also uses
+   data from that file.
 
 The semantic compiler is divided into schema linking, pattern linking, fallback resolution, CLDR
 lookup, and code generation. Diagnostics preserve source spans and can include related spans in
@@ -94,10 +97,20 @@ are not emitted into runtime tables.
 
 The compiler emits a macro and message shard for each schema key, a lightweight locale handle and
 full dynamic catalog for each source locale, a closed `LocaleTag` enum, and the key-based `t!`
-dispatcher. Key macros take `&Locale` and their own shard. Callers can get the handle through
-`LocaleTag::as_locale()` or `catalogs::locale_<tag>::LOCALE`. Dynamic-ID callers use
-`LocaleTag::as_catalog()` or `catalogs::locale_<tag>::CATALOG`. The generated enum and its lookup
-behavior are described in [Locale identity](policy.md#locale-identity).
+dispatcher. Key macros accept a `LocaleProvider` value and their own shard. The runtime implements
+the trait for `Locale` and references; generated `LocaleTag` also implements it, and applications
+can implement it for their own locale types. `LocaleTag::as_locale()` and
+`catalogs::locale_<tag>::LOCALE` remain available when a handle is needed directly. Dynamic-ID
+callers use `LocaleTag::as_catalog()` or `catalogs::locale_<tag>::CATALOG`. The generated enum and
+its lookup behavior are described in [Locale identity](policy.md#locale-identity).
+
+Zero-argument key macros return `Result<&'static str, RenderError>` from preflattened program text;
+messages with schema arguments return `Result<String, RenderError>`. Dynamic `Catalog::render`
+returns `Result<RenderedMessage, RenderError>`, where `RenderedMessage` is borrowed for
+zero-argument messages and owned for parameterized messages. Call `into_owned()` when dynamic
+callers need a `String` in both cases. If `CompilerOptions` configures a render-error fallback,
+`t!` converts render errors to that fixed text and returns `&'static str` or `String` according to
+the message signature. The `m_*` macros and runtime rendering APIs retain their `Result` values.
 
 ### Generated message calls
 
@@ -109,10 +122,11 @@ the values against the generated schema signature.
 ### Catalog selection and dispatch
 
 `t!` dispatches by a literal message key. In the default build configuration, calls pass a
-`locale = expression` header to select the lightweight locale handle. Optional atomic mode stores
+`locale = expression` header whose value implements `LocaleProvider`. Optional atomic mode stores
 a pointer to the current `Locale` and requires a configured final fallback locale and pointer-width
-atomics. `current_catalog()` remains a separate dynamic-ID conversion. See [Advanced
-usage](advance.md#optional-process-wide-locale-selection) for configuration details.
+atomics. The keyed renderer resolves a provider once, then validates the resulting locale index and
+tag against the shard. `current_catalog()` remains a separate dynamic-ID conversion. See
+[Advanced usage](advance.md#optional-process-wide-locale-selection) for configuration details.
 
 ### Typed formatting
 
@@ -131,6 +145,7 @@ program store. Both paths use the same branch and formatting evaluator. Their st
 write to a caller-owned sink without allocating during table lookup or rendering. `Catalog::try_new`
 validates application-built dynamic catalogs; compiler-created keyed shards and dynamic stores
 use trusted static constructors after compile-time validation. The checked constructor validates
+static text against literal instructions, requires it for zero-argument messages, and validates
 each plural rule set and each plural node's category branches once. Rendering then relies on those
 immutable tables, so plural selection does not repeat the rule-category check.
 

@@ -15,10 +15,10 @@ pub use u18n_macros::{
 pub use catalog::{
     ArgumentValue, Catalog, CatalogData, CivilDate, CivilTime, CurrencyPrecision, Decimal,
     FormatNode, FormatOptions, FormatRequest, FormatStyle, FormatValue, Grouping, Instant,
-    Instruction, Locale, LocaleProgram, MessageBinding, MessageData, MessageProgram,
-    MessageShardData, MessageSignature, Money, OrdinalCount, PluralBranchRecord, PluralCount,
-    PluralDecimal, PluralNode, PluralSelector, Precision, RenderError, Rounding,
-    SelectBranchRecord, SelectNode, SharedProgramStore,
+    Instruction, Locale, LocaleProgram, LocaleProvider, MessageBinding, MessageData,
+    MessageProgram, MessageShardData, MessageSignature, Money, OrdinalCount, PluralBranchRecord,
+    PluralCount, PluralDecimal, PluralNode, PluralSelector, Precision, RenderError,
+    RenderedMessage, Rounding, SelectBranchRecord, SelectNode, SharedProgramStore,
 };
 pub use format::{Formatter, FormatterError};
 pub use plural::{

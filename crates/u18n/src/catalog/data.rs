@@ -37,6 +37,8 @@ pub struct MessageProgram {
     pub instruction_start: u32,
     /// Instruction table position immediately after this program.
     pub instruction_end: u32,
+    /// Flattened literal text when the complete program contains no argument operations.
+    pub static_text: Option<&'static str>,
 }
 
 /// A locale-authored mapping from schema message ID to shared program ID.

@@ -16,6 +16,7 @@ pub(super) struct MessageSignatureData {
 pub(super) struct MessageProgramData {
     pub(super) instruction_start: u32,
     pub(super) instruction_end: u32,
+    pub(super) static_text: Option<String>,
 }
 
 pub(super) struct MessageBindingData {

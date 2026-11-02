@@ -9,30 +9,35 @@ specification](specification/locale-ast.md).
 ## Select a locale for each call
 
 Each generated locale has an independent lightweight handle for keyed calls and a full catalog for
-dynamic message IDs. Parse a tag with `LocaleTag`, then select the handle for generated message
-macros:
+dynamic message IDs. `LocaleTag` implements `LocaleProvider`, so pass it directly to generated
+message macros. Use `as_locale()` when code needs the handle itself:
 
 ```rust
 use core::str::FromStr;
 
 use u18n::PluralCount;
-use u18n_showcase::{LocaleTag, t};
+use u18n_showcase::{LocaleTag, catalogs, m_cart_sitems, t};
 
 let tag = LocaleTag::from_str("es-419").expect("locale is included");
-let locale = tag.as_locale();
 let text = t!(
     "cart.items",
-    locale = locale,
+    locale = tag,
     { count: PluralCount::new(3), owner: "Ada", gender: "other" }
-)?;
+);
 ```
+
+For calls that need the lightweight handle explicitly, use `tag.as_locale()` or
+`catalogs::locale_es_419::LOCALE`.
 
 `LocaleTag` is a public enum with one variant for each locale supplied to the compiler. Variant
 identifiers concatenate the normalized subtags in PascalCase; for example, `en` is `En`,
 `es-419` is `Es419`, and `zh-Hant-HK` is `ZhHantHk`. The enum can be matched exhaustively, and
 adding or removing a source locale can change that match. Source locales are looked up in a
-case-insensitive, string-sorted index and are not limited by the semantic-code profile. A separate
-CLDR parent index stores one numeric `u64` key per child. Bits 3–55 hold the bounded semantic
+case-insensitive, string-sorted index and are not limited by the semantic-code profile. Exact
+`FromStr` lookup is available with the default compiler options. The separate CLDR parent index
+and `LocaleTag::fallback` are generated only when
+`CompilerOptions::with_locale_tag_fallback(true)` is enabled, or with the CLI flag
+`--locale-tag-fallback`. When enabled, the index stores one numeric `u64` key per child. Bits 3–55 hold the bounded semantic
 language, script, and region code; bits 0–2 hold the matching fixed private `ParentLocale`
 discriminant. Rows sort by child code, and the enum supplies the canonical parent tag after lookup.
 `LocaleTag::from_str` accepts any
@@ -55,28 +60,53 @@ candidate selects the lexicographically first generated source locale. Tags outs
 semantic profile can match exactly and otherwise continue through structural truncation. The
 helper does not apply CLDR aliases or add likely subtags. You can also refer to a catalog directly
 as `catalogs::locale_es_419::CATALOG` for the dynamic-ID API. `LocaleTag::as_catalog()` selects
-that full catalog; `LocaleTag::as_locale()` selects the small handle used by generated key macros.
+that full catalog; `LocaleTag::as_locale()` returns the small generated handle.
+The option is independent of `--atomic` and `--final-fallback`.
 
 ## Call generated message macros
 
 In the default build configuration, `t!` requires a `locale = expression` header. A per-message
-macro takes a `&Locale` handle as its first argument:
+macro takes a `LocaleProvider` value as its first argument. `Locale`, `&Locale`, generated
+`LocaleTag`, and borrowed application providers are supported:
 
 ```rust
 let text = m_cart_sitems!(
-    locale,
+    tag,
     PluralCount::new(3),
     "Ada",
     "other"
 )?;
 ```
 
+Applications can implement `LocaleProvider` for a request or application type:
+
+```rust
+use u18n::{Locale, LocaleProvider};
+use u18n_showcase::{catalogs, m_cart_sitems, t};
+
+struct RequestLocale(&'static Locale);
+
+impl LocaleProvider for RequestLocale {
+    fn provide_locale(&self) -> &Locale {
+        self.0
+    }
+}
+
+let request_locale = RequestLocale(&catalogs::locale_es_419::LOCALE);
+let title = t!("app.title", locale = &request_locale);
+let items = m_cart_sitems!(&request_locale, PluralCount::new(2), "Ada", "female")?;
+```
+
+The provider returns a generated `Locale` handle; keyed rendering checks its index and exact
+source tag against the selected message shard. A shared `&dyn LocaleProvider` is supported by the
+`MessageData` rendering methods.
+
 Schema parameter order controls positional calls. For long signatures, use named fields in any
 order; the names must match the schema, and every declared parameter must be supplied:
 
 ```rust
 let text = m_checkout_sorder_usummary!(
-    locale,
+    tag,
     {
         currency: "USD",
         total: 24.50,
@@ -246,9 +276,13 @@ specification](specification/locale-ast.md#grammar) lists all format operations 
 
 ## Stream output through the runtime
 
-Generated message macros return `Result<String, RenderError>`. A `MessageData` handle also offers
-`render_to` and `render_with_to` for keyed rendering into a caller-owned `core::fmt::Write` sink.
-Code that manages numeric message IDs can use the dynamic catalog methods:
+Zero-argument generated message macros return `Result<&'static str, RenderError>`; parameterized
+macros return `Result<String, RenderError>`. Dynamic `Catalog::render` returns a
+`RenderedMessage` (`Cow<'static, str>`), borrowed for zero-argument messages and owned for
+parameterized messages. Call `into_owned()` if a dynamic call must always produce a `String`. A
+`MessageData` handle also offers `render_to` and `render_with_to` for keyed rendering into a
+caller-owned `core::fmt::Write` sink. Code that manages numeric message IDs can use the dynamic
+catalog methods:
 
 ```rust
 let mut output = String::new();
@@ -315,6 +349,10 @@ the shared-pool and aggregate keyed-pool values in `GeneratedSource::pool_statis
 [algorithms
 specification](specification/algorithms.md#shared-and-keyed-string-pools) describes the optimization limits
 and fingerprint inputs. Most applications can use the default limit.
+
+The `locale-tag-fallback-generation` setting is also recorded in generated metadata and the input
+fingerprint. Its CLDR supplemental-data digest remains included when disabled because plural-rule
+resolution uses parent data from the same file.
 
 ## Further reading
 

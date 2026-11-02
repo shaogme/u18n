@@ -10,10 +10,10 @@ Add the runtime to your application and the compiler as a build dependency:
 
 ```toml
 [dependencies]
-u18n = "0.2.0"
+u18n = "0.3.0"
 
 [build-dependencies]
-u18n-compiler = "0.2.0"
+u18n-compiler = "0.3.0"
 ```
 
 Create these files in the package root:
@@ -107,7 +107,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             ),
         ],
     );
-    let generated = Compiler::new(CompilerOptions::default()).compile(input)?;
+    let options = CompilerOptions::default()
+        .with_locale_tag_fallback(true)
+        .with_render_error_fallback_message("Unable to render message");
+    let generated = Compiler::new(options).compile(input)?;
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?)
         .join("u18n_messages.rs");
     fs::write(output, generated.source())?;
@@ -127,20 +130,31 @@ include!(concat!(env!("OUT_DIR"), "/u18n_messages.rs"));
 ```
 
 The generated source contains one dynamic catalog and one lightweight locale handle per source
-locale, plus a private data shard per schema key and its generated macro. `LocaleTag` and
-`LocaleTag::fallback` select a locale handle for message macros; for example,
-`LocaleTag::fallback("es-AR").expect("valid request").as_locale()` selects `es-419`. Use
-`as_catalog()` when calling the dynamic numeric-ID API. Runtime locale selection is separate from
-locale-file fallback, which resolves message inheritance at compile time. The compiler checks
-every source file and requires every message to resolve for every locale before it generates Rust.
+locale, plus a private data shard per schema key and its generated macro. `LocaleTag::fallback` is
+generated only when `with_locale_tag_fallback(true)` is enabled; it selects a catalog for message
+macros. For example,
+`LocaleTag::fallback("es-AR").expect("valid request")` selects `es-419` and can be passed
+directly to a key macro. `LocaleTag::as_locale()` remains available when code needs the lightweight
+handle explicitly. Exact matching of included tags with `parse::<LocaleTag>()` remains available
+with the default options. The CLI equivalent is `--locale-tag-fallback`. Use `as_catalog()` when
+calling the dynamic numeric-ID API. Runtime locale selection is separate from locale-file fallback,
+which resolves message inheritance at compile time. The compiler checks every source file and
+requires every message to resolve for every locale before it generates Rust.
 
 For tag parsing, fallback order, and generated variant names, see [Advanced usage](advance.md#select-a-locale-for-each-call)
 and [Locale identity policy](policy.md#runtime-catalog-selection).
 
+The CLI flag can be enabled independently of atomic locale selection:
+
+```sh
+u18n-cli compile --schema schema.u18n --locale locales/en.u18n \
+  --locale locales/es-419.u18n --locale-tag-fallback --output "$OUT_DIR/catalogs.rs"
+```
+
 ## 5. Render a message
 
-Use the generated per-message macros with a lightweight locale handle and arguments in schema
-order:
+Use the generated per-message macros with a locale value and arguments in schema order. `Locale`,
+`&Locale`, generated `LocaleTag`, and application types implementing `LocaleProvider` are accepted:
 
 ```rust
 use std::error::Error;
@@ -158,7 +172,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("{}", m_app_stitle!(english)?);
     println!("{}", m_cart_sitems!(english, PluralCount::new(2))?);
-    println!("{}", m_app_stitle!(spanish)?);
+    println!("{}", m_app_stitle!(spanish_tag)?);
     println!("{}", m_cart_sitems!(spanish, PluralCount::new(0))?);
     println!("{}", m_cart_shint!(spanish)?);
     Ok(())
@@ -168,15 +182,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 The generated macro names encode message keys: `app.title` becomes `m_app_stitle!`, and
 `cart.items` becomes `m_cart_sitems!`. You can also use named arguments when a message has
 several parameters. The key-based `t!` macro dispatches by a literal key; in the default
-non-atomic mode, pass a locale handle with a `locale = expression` header:
+non-atomic mode, pass a locale provider with a `locale = expression` header:
 
 ```rust
 let text = t!(
     "cart.items",
-    locale = spanish,
+    locale = spanish_tag,
     { count: PluralCount::new(2) }
-)?;
+);
 ```
+
+Key macros for messages with no schema parameters return `Result<&'static str, RenderError>`;
+parameterized key macros return `Result<String, RenderError>`. The dynamic numeric-ID API returns
+`Result<RenderedMessage, RenderError>`, where `RenderedMessage` is borrowed for zero-argument
+messages and owned for parameterized messages. Call `.into_owned()` when a dynamic call must yield
+a `String` in every case. The build script above configures a fixed render-error fallback, so its
+`t!` calls return `&'static str` for zero-argument
+messages and `String` for parameterized messages, using the fixed text only when rendering returns
+an error. The generated `m_*` macros and dynamic and streaming APIs continue to return
+`Result<_, RenderError>`. Without that option, `t!` returns the same `Result` as the matching
+message macro. The [Result-returning example](../examples/result-api/README.md) shows that
+configuration.
 
 `LocaleTag::from_str` accepts ASCII case variations and returns the authored spelling from
 `as_str()`. Source fallback targets remain case-sensitive. The Spanish `cart.hint` call above

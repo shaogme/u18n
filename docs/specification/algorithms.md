@@ -56,8 +56,8 @@ No spans are copied into generated runtime tables.
 Catalog identity and plural-rule lookup are separate. The source tag, with recommended casing, is
 retained exactly for metadata, explicit fallback matching, and the catalog's `locale_tag`. Generated
 source-locale lookup compares tags without ASCII case and searches an index sorted by lowercase
-ASCII tag. Source catalog tags are not limited by the parent-code layout. `fallback` first checks
-this exact source-locale index, then checks the CLDR main-parent index using a semantic code for the
+ASCII tag. Source catalog tags are not limited by the parent-code layout. When generated, `fallback`
+first checks this exact source-locale index, then checks the CLDR main-parent index using a semantic code for the
 candidate's language, optional script, and optional region. This layout accepts 2- or 3-letter
 languages, an optional 4-letter script, and an optional 2-letter or 3-digit region. Each numeric
 `u64` row key stores the child code shifted left three bits and the parent discriminant in bits 0–2;
@@ -248,44 +248,63 @@ data. `from_str` parses a request and searches the source-locale index sorted by
 tag, accepting any ASCII casing of an included tag; malformed or extension-rejected tags and valid
 tags without an exact locale produce distinct errors. `as_str` returns the authored source
 spelling, `as_locale` returns the lightweight locale handle, and `as_catalog` returns the dynamic
-catalog. Each locale handle contains only its stable index and exact tag. Each CLDR main-parent index row stores a single numeric `u64`
-key with the semantic child code shifted left three bits and a fixed private generated
-`ParentLocale` discriminant in the low three bits. The enum provides the canonical BCP 47 spelling.
+catalog. Each locale handle contains only its stable index and exact tag. Exact `FromStr` lookup
+and catalog accessors are always generated. `LocaleTag::fallback` and its CLDR main-parent index
+are generated only when `CompilerOptions::with_locale_tag_fallback(true)` or CLI
+`--locale-tag-fallback` is enabled. Each parent index row stores one numeric `u64` key with the
+semantic child code shifted left three bits and a fixed private generated `ParentLocale`
+discriminant in the low three bits. The enum provides the canonical BCP 47 spelling. When enabled,
 `fallback` returns an error for malformed input, then checks the exact source-locale index and CLDR
-49 main-parent mappings before structurally truncating the request. It removes a private-use tail as
-a unit, treats grandfathered tags as atomic candidates, and returns the lexicographically first
+49 main-parent mappings before structurally truncating the request. It removes a private-use tail
+as a unit, treats grandfathered tags as atomic candidates, and returns the lexicographically first
 source locale for valid requests with no included candidate. It does not apply aliases or change
 message-pattern resolution.
+Generated `LocaleTag` implements `LocaleProvider`. The runtime also implements the trait for
+`Locale` and references, and applications can adapt local types to a generated `Locale` handle.
 Generated message macros use the injective key encoding defined in the schema specification. Each
-macro references only its matching shard and passes a lightweight locale handle, never a `Catalog`
-or global numeric message ID. The proc-macro helper validates positional arity or named fields,
-evaluates named expressions once in written order, then constructs the runtime argument array in
-schema order. The locale expression is evaluated once; a formatter expression, when required, is
-evaluated next.
+macro references only its matching shard and passes a `LocaleProvider` value, never a `Catalog` or
+global numeric message ID. `MessageData` resolves each provider once; keyed lookup continues to
+validate the resulting locale index and exact tag against the shard. A zero-argument macro returns
+`Result<&'static str, RenderError>`
+through the shard's static-text accessor. A parameterized macro returns `Result<String,
+RenderError>` and constructs the typed runtime argument array. The proc-macro helper validates
+positional arity or named fields, evaluates named expressions once in written order, then arranges
+them in schema order. The locale expression is evaluated once; a formatter expression, when
+required, is evaluated next.
 
 The generated `t!` macro dispatches a literal key to its message macro. Non-atomic builds require a
 `locale = expression` header. Atomic builds use the current lightweight locale by default and may
 still receive an explicit `locale` header. Atomic generation requires an explicit final fallback
-locale; the generated selector uses pointer-width atomics. `current_catalog()` and
+locale; the generated selector uses pointer-width atomics. An optional fixed render-error fallback
+converts `t!` errors to `&'static str` for zero-argument messages and `String` for parameterized
+messages. It is lazy and applies only to the rendering result; `m_*`, `MessageData`, `Catalog`, and
+streaming calls retain `Result<_, RenderError>`. `current_catalog()` and
 `FINAL_FALLBACK_CATALOG` remain dynamic-ID conveniences.
 
 The input SHA-256 is length-delimited and includes the raw schema source, raw locale sources ordered
-by source tag, output-format version (`2`), CLDR version, IANA registry digest, cardinal-rule
+by source tag, output-format version (`3`), CLDR version, IANA registry digest, cardinal-rule
 digest, ordinal-rule digest, alias digest, supplemental-data digest, extension policy,
-atomic-selection setting, final fallback tag, and string-pool limit. Cardinal-rule and alias
-digests identify inputs used for plural resolution; the supplemental digest identifies the parent
-mappings embedded in `LocaleTag::fallback`. Locale path names and the original order of locale
-inputs are not included. The generated header records each locale-data digest, the resulting
-fingerprint, and generation metadata.
+atomic-selection setting, locale-tag-fallback-generation setting, final fallback tag, an optional
+length-delimited render-error fallback message, and string-pool limit. The render-error fallback
+field is omitted when unset; a configured empty string is distinct from no value. Cardinal-rule
+and alias digests identify inputs used for plural resolution; the supplemental digest remains included
+because it also provides plural-component parent data. The generated header records each
+locale-data digest, the resulting fingerprint, and the `locale-tag-fallback-generation=true|false`
+setting. Locale path names and the original order of locale inputs are not included. The hash
+domain remains `u18n-catalog-input-v3`, and output-format and fingerprint metadata remain version
+`3`.
 
 ## Runtime rendering
 
 `Catalog::render` and the streaming variants take a numeric message ID and arguments in schema
-order. Dynamic rendering loads the shared message signature, searches the selected locale's sorted
-bindings, and follows direct fallback links until it finds a program. `MessageData::render` and its
-streaming and formatter variants take a lightweight `Locale`; keyed rendering selects the
-pre-resolved program from its shard by locale index and verifies that the exact tag agrees. Both
-routes check the argument count before walking the program's instruction range. The compiler
+order. `Catalog::render` returns `RenderedMessage` (`Cow<'static, str>`): zero-argument programs
+return `Borrowed(static_text)`, and parameterized programs return `Owned(String)`. Call
+`into_owned()` when a dynamic caller needs a `String` unconditionally. Dynamic rendering loads the
+shared message signature, checks argument count, searches the selected locale's sorted bindings,
+and follows direct fallback links until it finds a program. `MessageData::render` and its streaming
+and formatter variants take a lightweight `Locale`; keyed rendering selects the pre-resolved
+program from its shard by locale index and verifies that the exact tag agrees. Both routes check
+the argument count before walking the program's instruction range. The compiler
 validates generated tables, and `Catalog::try_new` checks caller-built dynamic data once at
 construction:
 

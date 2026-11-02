@@ -251,7 +251,11 @@ impl InvocationExpansion {
         let locale = parse_group_expression(locale_group, "locale")?;
         let message_data = parse_group_expression(message_data_group, "message shard")?;
         let formatter = if metadata.needs_formatter {
-            Some(parse_group_expression(formatter_group, "formatter")?)
+            if formatter_group.stream().is_empty() {
+                None
+            } else {
+                Some(parse_group_expression(formatter_group, "formatter")?)
+            }
         } else if formatter_group.stream().is_empty() {
             None
         } else {
@@ -422,6 +426,19 @@ fn emit_render_expression(
     let locale_binding = format_ident!("__u18n_locale", span = Span::mixed_site());
     let message_data_binding = format_ident!("__u18n_message_data", span = Span::mixed_site());
     let formatter_binding = format_ident!("__u18n_formatter", span = Span::mixed_site());
+    if metadata.parameters.is_empty() {
+        if metadata.needs_formatter || formatter.is_some() {
+            return Err(SynError::new(
+                Span::call_site(),
+                "zero-argument message cannot require a formatter",
+            ));
+        }
+        return Ok(quote! {{
+            let #locale_binding = #locale;
+            let #message_data_binding = #message_data;
+            #message_data_binding.render_static(#locale_binding)
+        }});
+    }
     let argument_bindings = (0..arguments.evaluation_order.len())
         .map(|index| format_ident!("__u18n_value_{index}", span = Span::mixed_site()))
         .collect::<Vec<_>>();
@@ -446,19 +463,32 @@ fn emit_render_expression(
 
     let argument_count = LitInt::new(&metadata.parameters.len().to_string(), Span::call_site());
     let argument_values = quote! { #(#argument_values),* };
+    let has_formatter = formatter.is_some();
     let formatter_binding_statement = if let Some(formatter_expression) = formatter {
         quote_spanned!(formatter_expression.span()=> let #formatter_binding = #formatter_expression;)
     } else {
         quote! {}
     };
     if metadata.needs_formatter {
+        let render = if has_formatter {
+            quote!(#message_data_binding.render_with_owned(
+                #locale_binding,
+                #formatter_binding,
+                &__u18n_arguments
+            ))
+        } else {
+            quote!(#message_data_binding.render_owned(
+                #locale_binding,
+                &__u18n_arguments
+            ))
+        };
         Ok(quote! {{
             let #locale_binding = #locale;
             let #message_data_binding = #message_data;
             #formatter_binding_statement
             #(#argument_binding_statements)*
             let __u18n_arguments: [::u18n::ArgumentValue<'_>; #argument_count] = [#argument_values];
-            #message_data_binding.render_with(#locale_binding, #formatter_binding, &__u18n_arguments)
+            #render
         }})
     } else {
         Ok(quote! {{
@@ -466,7 +496,7 @@ fn emit_render_expression(
             let #message_data_binding = #message_data;
             #(#argument_binding_statements)*
             let __u18n_arguments: [::u18n::ArgumentValue<'_>; #argument_count] = [#argument_values];
-            #message_data_binding.render(#locale_binding, &__u18n_arguments)
+            #message_data_binding.render_owned(#locale_binding, &__u18n_arguments)
         }})
     }
 }

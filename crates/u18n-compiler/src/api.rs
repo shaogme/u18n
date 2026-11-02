@@ -62,7 +62,9 @@ impl CompilationInput {
 pub struct CompilerOptions {
     pool_limit: usize,
     atomic_locale: bool,
+    locale_tag_fallback: bool,
     final_fallback_locale: Option<String>,
+    render_error_fallback_message: Option<String>,
 }
 
 impl CompilerOptions {
@@ -84,6 +86,15 @@ impl CompilerOptions {
         self.atomic_locale
     }
 
+    pub fn with_locale_tag_fallback(mut self, locale_tag_fallback: bool) -> Self {
+        self.locale_tag_fallback = locale_tag_fallback;
+        self
+    }
+
+    pub fn locale_tag_fallback(&self) -> bool {
+        self.locale_tag_fallback
+    }
+
     pub fn with_final_fallback_locale(mut self, locale: impl Into<String>) -> Self {
         self.final_fallback_locale = Some(locale.into());
         self
@@ -92,6 +103,15 @@ impl CompilerOptions {
     pub fn final_fallback_locale(&self) -> Option<&str> {
         self.final_fallback_locale.as_deref()
     }
+
+    pub fn with_render_error_fallback_message(mut self, message: impl Into<String>) -> Self {
+        self.render_error_fallback_message = Some(message.into());
+        self
+    }
+
+    pub fn render_error_fallback_message(&self) -> Option<&str> {
+        self.render_error_fallback_message.as_deref()
+    }
 }
 
 impl Default for CompilerOptions {
@@ -99,7 +119,9 @@ impl Default for CompilerOptions {
         Self {
             pool_limit: 256,
             atomic_locale: false,
+            locale_tag_fallback: false,
             final_fallback_locale: None,
+            render_error_fallback_message: None,
         }
     }
 }
@@ -223,7 +245,9 @@ impl Compiler {
         let generation = GenerationConfig {
             pool_limit: self.options.pool_limit,
             atomic_locale: self.options.atomic_locale,
+            locale_tag_fallback: self.options.locale_tag_fallback,
             final_fallback_locale: self.options.final_fallback_locale.as_deref(),
+            render_error_fallback_message: self.options.render_error_fallback_message.as_deref(),
         };
         let fingerprint = Fingerprint::calculate(FingerprintInput {
             schema: &parsed.schema_source,

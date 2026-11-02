@@ -168,6 +168,8 @@ fn atomic_compile_options_are_validated_and_reported() -> Result<(), Box<dyn Err
     let generated = String::from_utf8(valid.stdout)?;
     check(generated.contains("atomic-locale-selection=true"));
     check(generated.contains("final-fallback-locale=en"));
+    check(generated.contains("locale-tag-fallback-generation=false"));
+    check(!generated.contains("pub fn fallback(locale_tag: &str)"));
     check(generated.contains("pub const FINAL_FALLBACK_LOCALE"));
     check(generated.contains("macro_rules! t"));
 
@@ -249,6 +251,64 @@ fn atomic_options_reject_duplicates_and_non_compile_commands() -> Result<(), Box
     check(
         String::from_utf8(coverage.stderr)?.contains("--final-fallback is only valid for compile"),
     );
+
+    let duplicate_locale_tag_fallback = fixture.run_with_options(
+        "compile",
+        schema,
+        &locales,
+        &["--locale-tag-fallback", "--locale-tag-fallback"],
+    )?;
+    check(!duplicate_locale_tag_fallback.status.success());
+    check(
+        String::from_utf8(duplicate_locale_tag_fallback.stderr)?
+            .contains("duplicate --locale-tag-fallback"),
+    );
+
+    let extract_locale_tag_fallback = fixture.run_with_options(
+        "extract",
+        schema,
+        &locales,
+        &["--locale-tag-fallback", "--source-locale", "en"],
+    )?;
+    check(!extract_locale_tag_fallback.status.success());
+    check(
+        String::from_utf8(extract_locale_tag_fallback.stderr)?
+            .contains("--locale-tag-fallback is only valid for compile"),
+    );
+
+    let coverage_locale_tag_fallback =
+        fixture.run_with_options("coverage", schema, &locales, &["--locale-tag-fallback"])?;
+    check(!coverage_locale_tag_fallback.status.success());
+    check(
+        String::from_utf8(coverage_locale_tag_fallback.stderr)?
+            .contains("--locale-tag-fallback is only valid for compile"),
+    );
+    Ok(())
+}
+
+#[test]
+fn locale_tag_fallback_flag_is_opt_in_and_independent_of_atomic_selection()
+-> Result<(), Box<dyn Error>> {
+    let fixture = Fixture::new()?;
+    let schema = "schema 1; message app.title();";
+    let locales = [("en.u18n", "locale en; message app.title = \"Title\";")];
+
+    let default = fixture.run_with_options("compile", schema, &locales, &[])?;
+    check(default.status.success());
+    let default_source = String::from_utf8(default.stdout)?;
+    check(default_source.contains("locale-tag-fallback-generation=false"));
+    check(!default_source.contains("pub fn fallback(locale_tag: &str)"));
+    check(!default_source.contains("ParentIndexEntry"));
+    check(!default_source.contains("PARENT_LOCALE_BITS"));
+
+    let enabled =
+        fixture.run_with_options("compile", schema, &locales, &["--locale-tag-fallback"])?;
+    check(enabled.status.success());
+    let enabled_source = String::from_utf8(enabled.stdout)?;
+    check(enabled_source.contains("locale-tag-fallback-generation=true"));
+    check(enabled_source.contains("pub fn fallback(locale_tag: &str)"));
+    check(enabled_source.contains("static PARENT_INDEX"));
+    check(enabled_source.contains("atomic-locale-selection=false"));
     Ok(())
 }
 
@@ -262,6 +322,84 @@ fn help_documents_atomic_selection_requirements() -> Result<(), Box<dyn Error>> 
     check(help.contains("--atomic --final-fallback TAG"));
     check(help.contains("requires --atomic"));
     check(help.contains("input locale catalog"));
+    check(help.contains("--render-error-fallback-message TEXT"));
+    check(help.contains("[--locale-tag-fallback]"));
+    Ok(())
+}
+
+#[test]
+fn render_error_fallback_option_accepts_text_and_is_compile_only() -> Result<(), Box<dyn Error>> {
+    let fixture = Fixture::new()?;
+    let schema = "schema 1; message app.title();";
+    let locales = [("en.u18n", "locale en; message app.title = \"Title\";")];
+    let fallback = "暂不可用: \"quoted\" \\ path\nnext line";
+    let configured = fixture.run_with_options(
+        "compile",
+        schema,
+        &locales,
+        &["--render-error-fallback-message", fallback],
+    )?;
+    check(configured.status.success());
+    let generated = String::from_utf8(configured.stdout)?;
+    check(generated.contains(&format!("// render-error-fallback-message={fallback:?}")));
+    check(generated.contains(&format!("[$crate], {fallback:?};")));
+    let generated_path = fixture.write("generated.rs", &generated)?;
+    let rustfmt = Command::new("rustfmt").arg(generated_path).output()?;
+    check(rustfmt.status.success());
+
+    let empty = fixture.run_with_options(
+        "compile",
+        schema,
+        &locales,
+        &["--render-error-fallback-message", ""],
+    )?;
+    check(empty.status.success());
+    check(String::from_utf8(empty.stdout)?.contains("// render-error-fallback-message=\"\""));
+
+    let duplicate = fixture.run_with_options(
+        "compile",
+        schema,
+        &locales,
+        &[
+            "--render-error-fallback-message",
+            "first",
+            "--render-error-fallback-message",
+            "second",
+        ],
+    )?;
+    check(!duplicate.status.success());
+    check(
+        String::from_utf8(duplicate.stderr)?.contains("duplicate --render-error-fallback-message"),
+    );
+
+    let extract = fixture.run_with_options(
+        "extract",
+        schema,
+        &locales,
+        &[
+            "--render-error-fallback-message",
+            "fallback",
+            "--source-locale",
+            "en",
+        ],
+    )?;
+    check(!extract.status.success());
+    check(
+        String::from_utf8(extract.stderr)?
+            .contains("--render-error-fallback-message is only valid for compile"),
+    );
+
+    let coverage = fixture.run_with_options(
+        "coverage",
+        schema,
+        &locales,
+        &["--render-error-fallback-message", "fallback"],
+    )?;
+    check(!coverage.status.success());
+    check(
+        String::from_utf8(coverage.stderr)?
+            .contains("--render-error-fallback-message is only valid for compile"),
+    );
     Ok(())
 }
 
@@ -280,7 +418,8 @@ fn compiles_typed_messages_and_reports_reproducible_metadata() -> Result<(), Box
     )?;
     check(output.status.success());
     let generated = fixture.generated()?;
-    check(generated.contains("output-format-version=2"));
+    check(generated.contains("output-format-version=3"));
+    check(generated.contains("locale-tag-fallback-generation=false"));
     check(generated.contains("cldr-cardinal-rules-sha256=69a30c57a621de9c52ec6ca95fe7bf9f06df6f8c13ca71a72e447b532c92cff7"));
     check(generated.contains("cldr-ordinal-rules-sha256=6c62fa2250f4f0150a3c7e24fc93c20ae6722f65bd26b49aaad799b40f8014b3"));
     check(generated.contains(
@@ -322,7 +461,7 @@ fn compiles_a_crlf_locale_fixture_with_a_rendered_line_break() -> Result<(), Box
 
     check(output.status.success());
     let generated = fs::read_to_string(output_path)?;
-    check(generated.contains("output-format-version=2"));
+    check(generated.contains("output-format-version=3"));
     check(generated.contains("Instruction::LineBreak"));
     check(generated.contains("text_pool: \"firstsecond\""));
     Ok(())

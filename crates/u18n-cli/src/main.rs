@@ -39,8 +39,14 @@ fn run() -> Result<(), String> {
             let mut options = CompilerOptions::default()
                 .with_pool_limit(args.pool_limit())
                 .with_atomic_locale(args.atomic_locale());
+            if args.locale_tag_fallback() {
+                options = options.with_locale_tag_fallback(true);
+            }
             if let Some(final_fallback) = args.final_fallback_locale() {
                 options = options.with_final_fallback_locale(final_fallback);
+            }
+            if let Some(message) = args.render_error_fallback_message() {
+                options = options.with_render_error_fallback_message(message);
             }
             let compiler = Compiler::new(options);
             let generated = compiler.compile(input).map_err(|error| error.to_string())?;

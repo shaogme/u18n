@@ -3,12 +3,13 @@ use core::{
     ptr,
     str::FromStr,
 };
-use std::cell::RefCell;
+use std::{borrow::Cow, cell::RefCell};
 
 use u18n::{
     ArgumentValue, Catalog, CatalogData, CivilDate, CivilTime, Decimal, FormatOptions,
-    FormatRequest, FormatValue, Formatter, FormatterError, Instant, MessageBinding, Money,
-    OrdinalCount, PluralCount, PluralDecimal, RenderError, SharedProgramStore,
+    FormatRequest, FormatValue, Formatter, FormatterError, Instant, Locale, LocaleProvider,
+    MessageBinding, Money, OrdinalCount, PluralCount, PluralDecimal, RenderError,
+    SharedProgramStore,
 };
 use u18n_showcase::{
     FINAL_FALLBACK_LOCALE, LocaleTag, catalogs, clear_current_locale, m_app_smultiline,
@@ -17,6 +18,12 @@ use u18n_showcase::{
 };
 
 struct ExampleFormatter;
+
+struct FailingFormatter;
+
+struct RequestLocale {
+    locale: &'static Locale,
+}
 
 const ENGLISH_CATALOG: &Catalog = &catalogs::locale_en::CATALOG;
 
@@ -39,6 +46,12 @@ static FOREIGN_CATALOG: Catalog = Catalog::new_trusted(CatalogData {
     bindings: &FOREIGN_BINDINGS,
     shared_store: &FOREIGN_STORE,
 });
+
+impl LocaleProvider for RequestLocale {
+    fn provide_locale(&self) -> &Locale {
+        self.locale
+    }
+}
 
 #[test]
 fn catalog_lookup_validates_tags_and_matches_case_insensitively() {
@@ -124,42 +137,91 @@ fn key_based_translation_uses_atomic_selection_and_explicit_overrides() {
     assert!(ptr::eq(FINAL_FALLBACK_LOCALE, english));
 
     clear_current_locale();
-    assert_eq!(t!("app.title"), Ok(String::from("Tiny Cart")));
+    assert_eq!(t!("app.title"), "Tiny Cart");
 
     let spanish_tag = LocaleTag::from_str("es-419").expect("known locale tag");
     set_current_locale(spanish_tag);
-    assert_eq!(t!(r#"app.title"#), Ok(String::from("Carrito pequeño")));
-    assert_eq!(
-        t!("app.title", locale = english),
-        Ok(String::from("Tiny Cart"))
-    );
+    assert_eq!(t!(r#"app.title"#), "Carrito pequeño");
+    assert_eq!(t!("app.title", locale = english), "Tiny Cart");
     let value = PluralDecimal::new(150, 2).expect("valid plural decimal");
-    assert_eq!(
-        t!("cart.decimal_count", value),
-        Ok(String::from("1.50 items"))
-    );
+    assert_eq!(t!("cart.decimal_count", value), String::from("1.50 items"));
     assert_eq!(
         t!("cart.decimal_count", { value: value, }),
-        Ok(String::from("1.50 items"))
+        String::from("1.50 items")
     );
 
     let formatter = ExampleFormatter;
     let amount = Decimal::new(1995, 2);
     let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
     assert_eq!(
-        t!("cart.typed_total", formatter = &formatter, { amount, charge })
-            .expect("current catalog is used for formatting"),
+        t!("cart.typed_total", formatter = &formatter, { amount, charge }),
         "Total: decimal:1995:2@es-419; charge: money:1234:2:USD@es-419"
     );
     assert_eq!(
-        t!("cart.typed_total", locale = english, formatter = &formatter, { amount, charge })
-            .expect("explicit catalog overrides the current selection"),
+        t!("cart.typed_total", locale = english, formatter = &formatter, { amount, charge }),
         "Total: decimal:1995:2@en; charge: money:1234:2:USD@en"
     );
 
     clear_current_locale();
-    assert_eq!(t!("app.title"), Ok(String::from("Tiny Cart")));
+    assert_eq!(t!("app.title"), "Tiny Cart");
     assert!(ptr::eq(spanish_tag.as_locale(), spanish));
+}
+
+#[test]
+fn keyed_macros_accept_generated_and_application_locale_providers() {
+    let spanish_tag = LocaleTag::Es419;
+    let request_locale = RequestLocale {
+        locale: spanish_tag.as_locale(),
+    };
+    let count = PluralCount::new(2);
+
+    assert_eq!(m_app_stitle!(spanish_tag), Ok("Carrito pequeño"));
+    assert_eq!(t!("app.title", locale = spanish_tag), "Carrito pequeño");
+    assert_eq!(m_app_stitle!(&request_locale), Ok("Carrito pequeño"));
+    assert_eq!(t!("app.title", locale = &request_locale), "Carrito pequeño");
+
+    let expected_items = String::from("Ada tiene 2 artículos en el carrito. Gracias, señora.");
+    assert_eq!(
+        m_cart_sitems!(spanish_tag, count, "Ada", "female"),
+        Ok(expected_items.clone())
+    );
+    assert_eq!(
+        t!(
+            "cart.items",
+            locale = spanish_tag,
+            { count, owner: "Ada", gender: "female" }
+        ),
+        expected_items
+    );
+    assert_eq!(
+        m_cart_sitems!(&request_locale, count, "Ada", "female"),
+        Ok(String::from(
+            "Ada tiene 2 artículos en el carrito. Gracias, señora.",
+        ))
+    );
+    assert_eq!(
+        t!(
+            "cart.items",
+            locale = &request_locale,
+            { count, owner: "Ada", gender: "female" }
+        ),
+        String::from("Ada tiene 2 artículos en el carrito. Gracias, señora.")
+    );
+
+    let formatter = ExampleFormatter;
+    let amount = Decimal::new(1995, 2);
+    let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
+    let provider: &dyn LocaleProvider = &request_locale;
+    assert_eq!(
+        catalogs::__MESSAGE_DATA_5
+            .render_with(
+                provider,
+                &formatter,
+                &[ArgumentValue::Decimal(amount), ArgumentValue::Money(charge)],
+            )
+            .expect("provider-based formatting succeeds"),
+        "Total: decimal:1995:2@es-419; charge: money:1234:2:USD@es-419"
+    );
 }
 
 #[test]
@@ -206,8 +268,7 @@ fn key_dispatch_evaluates_headers_and_named_values_once_in_written_order() {
                 Decimal::new(1995, 2)
             },
         }
-    )
-    .expect("key dispatch renders the formatted message");
+    );
 
     assert_eq!(
         rendered,
@@ -216,6 +277,36 @@ fn key_dispatch_evaluates_headers_and_named_values_once_in_written_order() {
     assert_eq!(
         &*trace.borrow(),
         &["locale", "formatter", "charge", "amount"]
+    );
+}
+
+#[test]
+fn translation_fallback_handles_render_errors_without_changing_message_macros() {
+    let english = &catalogs::locale_en::LOCALE;
+    let mismatched_locale = Locale::new_trusted(english.index(), "wrong-tag");
+    let amount = Decimal::new(1995, 2);
+    let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
+    let failing_formatter = FailingFormatter;
+
+    assert_eq!(
+        m_app_stitle!(&mismatched_locale),
+        Err(RenderError::LocaleMismatch)
+    );
+    assert_eq!(
+        t!("app.title", locale = &mismatched_locale),
+        "Unable to render message"
+    );
+    assert_eq!(
+        m_cart_styped_utotal!(english, &failing_formatter, { amount, charge }),
+        Err(RenderError::FormatterFailed)
+    );
+    assert_eq!(
+        t!("cart.typed_total", formatter = &failing_formatter, { amount, charge }),
+        "Unable to render message"
+    );
+    assert_eq!(
+        t!("cart.typed_total", { amount, charge }),
+        "Unable to render message"
     );
 }
 
@@ -261,8 +352,8 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
                 ArgumentValue::String("other"),
             ],
         );
-        assert_eq!(keyed, dynamic);
-        assert_eq!(dynamic, Ok(String::from(expected)));
+        assert_eq!(keyed.as_deref(), dynamic.as_deref());
+        assert_eq!(dynamic.as_deref(), Ok(expected));
     }
 
     for case in [
@@ -295,8 +386,8 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
         let value = PluralDecimal::new(case.coefficient, case.scale).expect("valid plural decimal");
         let keyed = m_cart_sdecimal_ucount!(english_locale, value);
         let dynamic = english_catalog.render(2, &[ArgumentValue::PluralDecimal(value)]);
-        assert_eq!(keyed, dynamic);
-        assert_eq!(dynamic, Ok(String::from(case.expected)));
+        assert_eq!(keyed.as_deref(), dynamic.as_deref());
+        assert_eq!(dynamic.as_deref(), Ok(case.expected));
     }
 
     for (rank, expected) in [
@@ -314,8 +405,8 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
         let keyed = m_rank_sposition!(english_locale, OrdinalCount::new(rank));
         let dynamic =
             english_catalog.render(8, &[ArgumentValue::OrdinalCount(OrdinalCount::new(rank))]);
-        assert_eq!(keyed, dynamic);
-        assert_eq!(dynamic, Ok(String::from(expected)));
+        assert_eq!(keyed.as_deref(), dynamic.as_deref());
+        assert_eq!(dynamic.as_deref(), Ok(expected));
     }
 }
 
@@ -367,6 +458,16 @@ impl Formatter for ExampleFormatter {
             _ => return Err(FormatterError::Unsupported),
         };
         result.map_err(|_| FormatterError::Failed)
+    }
+}
+
+impl Formatter for FailingFormatter {
+    fn format(
+        &self,
+        _request: FormatRequest<'_>,
+        _output: &mut dyn Write,
+    ) -> Result<(), FormatterError> {
+        Err(FormatterError::Failed)
     }
 }
 
@@ -441,49 +542,66 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     let french = &catalogs::locale_fr::CATALOG;
     let french_locale = &catalogs::locale_fr::LOCALE;
 
-    assert_eq!(m_app_stitle!(english_locale), english.render(1, &[]));
+    assert_eq!(
+        m_app_stitle!(english_locale).as_deref(),
+        english.render(1, &[]).as_deref()
+    );
+    assert_eq!(m_app_stitle!(french_locale), Ok("Tiny Cart"));
+    assert!(matches!(
+        french.render(1, &[]),
+        Ok(Cow::Borrowed("Tiny Cart"))
+    ));
     assert_eq!(
         m_cart_sdecimal_ucount!(
             french_locale,
             PluralDecimal::new(200, 2).expect("valid plural decimal")
-        ),
-        french.render(
-            2,
-            &[ArgumentValue::PluralDecimal(
-                PluralDecimal::new(200, 2).expect("valid plural decimal")
-            )]
         )
+        .as_deref(),
+        french
+            .render(
+                2,
+                &[ArgumentValue::PluralDecimal(
+                    PluralDecimal::new(200, 2).expect("valid plural decimal")
+                )]
+            )
+            .as_deref()
     );
     assert_eq!(
-        m_cart_sitems!(spanish_locale, PluralCount::new(2), "Ada", "female"),
-        spanish.render(
-            3,
-            &[
-                ArgumentValue::PluralCount(PluralCount::new(2)),
-                ArgumentValue::String("Ada"),
-                ArgumentValue::String("female"),
-            ]
-        )
+        m_cart_sitems!(spanish_locale, PluralCount::new(2), "Ada", "female").as_deref(),
+        spanish
+            .render(
+                3,
+                &[
+                    ArgumentValue::PluralCount(PluralCount::new(2)),
+                    ArgumentValue::String("Ada"),
+                    ArgumentValue::String("female"),
+                ]
+            )
+            .as_deref()
     );
     let amount = 19.95;
     assert_eq!(
-        m_cart_stotal!(spanish_locale, amount, "USD"),
-        spanish.render(
-            4,
-            &[ArgumentValue::Number(&amount), ArgumentValue::String("USD"),]
-        )
+        m_cart_stotal!(spanish_locale, amount, "USD").as_deref(),
+        spanish
+            .render(
+                4,
+                &[ArgumentValue::Number(&amount), ArgumentValue::String("USD"),]
+            )
+            .as_deref()
     );
 
     let formatter = ExampleFormatter;
     let amount = Decimal::new(1995, 2);
     let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
     assert_eq!(
-        m_cart_styped_utotal!(spanish_locale, &formatter, amount, charge),
-        spanish.render_with(
-            &formatter,
-            5,
-            &[ArgumentValue::Decimal(amount), ArgumentValue::Money(charge),]
-        )
+        m_cart_styped_utotal!(spanish_locale, &formatter, amount, charge).as_deref(),
+        spanish
+            .render_with(
+                &formatter,
+                5,
+                &[ArgumentValue::Decimal(amount), ArgumentValue::Money(charge),]
+            )
+            .as_deref()
     );
     assert_eq!(
         m_event_swhen!(
@@ -492,20 +610,25 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
             CivilDate::new(2026, 7, 4).expect("valid date"),
             CivilTime::new(9, 30, 0, 0).expect("valid time"),
             Instant::new(1_783_150_200, 0).expect("valid instant"),
-        ),
-        french.render_with(
-            &formatter,
-            7,
-            &[
-                ArgumentValue::Date(CivilDate::new(2026, 7, 4).expect("valid date")),
-                ArgumentValue::Time(CivilTime::new(9, 30, 0, 0).expect("valid time")),
-                ArgumentValue::Instant(Instant::new(1_783_150_200, 0).expect("valid instant"),),
-            ]
         )
+        .as_deref(),
+        french
+            .render_with(
+                &formatter,
+                7,
+                &[
+                    ArgumentValue::Date(CivilDate::new(2026, 7, 4).expect("valid date")),
+                    ArgumentValue::Time(CivilTime::new(9, 30, 0, 0).expect("valid time")),
+                    ArgumentValue::Instant(Instant::new(1_783_150_200, 0).expect("valid instant"),),
+                ]
+            )
+            .as_deref()
     );
     assert_eq!(
-        m_rank_sposition!(english_locale, OrdinalCount::new(22)),
-        english.render(8, &[ArgumentValue::OrdinalCount(OrdinalCount::new(22))])
+        m_rank_sposition!(english_locale, OrdinalCount::new(22)).as_deref(),
+        english
+            .render(8, &[ArgumentValue::OrdinalCount(OrdinalCount::new(22))])
+            .as_deref()
     );
 }
 

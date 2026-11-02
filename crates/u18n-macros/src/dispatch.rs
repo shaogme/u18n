@@ -25,6 +25,7 @@ struct DispatchInvocation {
     key: LitStr,
     atomic_locale: bool,
     anchor: Path,
+    render_error_fallback_message: Option<LitStr>,
     arguments: DispatchArguments,
 }
 
@@ -86,12 +87,19 @@ impl Parse for DispatchInvocation {
         if !anchor_content.is_empty() {
             return Err(anchor_content.error("unexpected tokens in generated crate anchor"));
         }
+        let render_error_fallback_message = if input.peek(Token![,]) {
+            input.parse::<Token![,]>()?;
+            Some(input.parse::<LitStr>()?)
+        } else {
+            None
+        };
         input.parse::<Token![;]>()?;
         let arguments = input.parse::<DispatchArguments>()?;
         Ok(Self {
             key,
             atomic_locale,
             anchor,
+            render_error_fallback_message,
             arguments,
         })
     }
@@ -178,10 +186,14 @@ impl TranslationDispatcher {
             .formatter
             .map_or_else(TokenStream2::new, |value| quote!(#value));
         let values = arguments.values;
-        Ok(quote! {
+        let dispatch = quote! {
             #anchor::#message_name! {
                 @__u18n_dispatch [#locale] [#formatter] { #values }
             }
+        };
+        Ok(match invocation.render_error_fallback_message {
+            Some(fallback) => quote!((#dispatch).unwrap_or_else(|_| #fallback.into())),
+            None => dispatch,
         })
     }
 }
@@ -227,6 +239,30 @@ fn rejects_invalid_message_key_shapes() {
 #[test]
 fn requires_a_string_literal_key() {
     assert!(parse2::<DispatchInvocation>(quote!(42, true, [crate_anchor];)).is_err());
+}
+
+#[test]
+fn optional_render_error_fallback_wraps_only_the_keyed_dispatch() {
+    let fallback = TranslationDispatcher::expand(quote!(
+        "cart.title",
+        false,
+        [crate_anchor],
+        "could not render";
+        locale = &CATALOG
+    ));
+    let unchanged = TranslationDispatcher::expand(quote!(
+        "cart.title",
+        false,
+        [crate_anchor];
+        locale = &CATALOG
+    ));
+
+    assert!(fallback.is_ok_and(|tokens| {
+        tokens.to_string().contains("unwrap_or_else")
+            && tokens.to_string().contains("could not render")
+            && tokens.to_string().contains("m_cart_stitle")
+    }));
+    assert!(unchanged.is_ok_and(|tokens| !tokens.to_string().contains("unwrap_or_else")));
 }
 
 #[test]

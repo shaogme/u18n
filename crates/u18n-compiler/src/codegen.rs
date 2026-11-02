@@ -38,7 +38,9 @@ pub(crate) struct GeneratedSource {
 pub(super) struct GenerationConfig<'a> {
     pub(super) pool_limit: usize,
     pub(super) atomic_locale: bool,
+    pub(super) locale_tag_fallback: bool,
     pub(super) final_fallback_locale: Option<&'a str>,
+    pub(super) render_error_fallback_message: Option<&'a str>,
 }
 
 pub(super) struct CodegenInput<'a> {
@@ -229,6 +231,7 @@ impl CodeGenerator {
             programs.push(MessageProgramData {
                 instruction_start: start,
                 instruction_end: end,
+                static_text: Self::flatten_static_text(pattern),
             });
             builder.drain_selector_tasks(pool)?;
         }
@@ -245,6 +248,22 @@ impl CodeGenerator {
                 })
             })
             .collect()
+    }
+
+    fn flatten_static_text(pattern: &LinkedPattern) -> Option<String> {
+        let mut text = String::new();
+        for part in &pattern.parts {
+            match part {
+                LinkedPatternPart::Text { value, .. } => text.push_str(value),
+                LinkedPatternPart::LineBreak { .. } => text.push('\n'),
+                LinkedPatternPart::Argument { .. }
+                | LinkedPatternPart::Pound { .. }
+                | LinkedPatternPart::Plural { .. }
+                | LinkedPatternPart::Select { .. }
+                | LinkedPatternPart::Format { .. } => return None,
+            }
+        }
+        Some(text)
     }
 
     fn lower_message_shards(

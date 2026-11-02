@@ -1,4 +1,4 @@
-use alloc::{vec, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 use core::{convert::TryFrom, ops::Range, ptr};
 use u18n_locale_tag::ParsedTag;
 
@@ -6,7 +6,7 @@ use crate::{
     PluralCategory, RenderError,
     catalog::{
         Catalog, CatalogData, CurrencyPrecision, FormatNode, FormatOptions, Instruction,
-        PluralBranchRecord, PluralSelector, Precision, SharedProgramStore,
+        MessageProgram, PluralBranchRecord, PluralSelector, Precision, SharedProgramStore,
     },
     plural::{RuleEvaluator, RuleSet},
 };
@@ -64,6 +64,9 @@ impl<'catalog> CatalogValidator<'catalog> {
         }
 
         let store = data.shared_store;
+        for program in store.programs {
+            Self::validate_static_text(program, store)?;
+        }
         for format in store.formats {
             Self::validate_format(format)?;
         }
@@ -130,6 +133,9 @@ impl<'catalog> CatalogValidator<'catalog> {
                     .programs
                     .get(program_index)
                     .ok_or(RenderError::InvalidCatalog)?;
+                if signature.argument_count == 0 && program.static_text.is_none() {
+                    return Err(RenderError::InvalidCatalog);
+                }
                 validator.validate_message_range(
                     InstructionRange {
                         start: program.instruction_start,
@@ -142,6 +148,46 @@ impl<'catalog> CatalogValidator<'catalog> {
             }
         }
         Ok(())
+    }
+
+    fn validate_static_text(
+        program: &MessageProgram,
+        store: &SharedProgramStore,
+    ) -> Result<(), RenderError> {
+        let Some(static_text) = program.static_text else {
+            return Ok(());
+        };
+        let positions = Self::checked_range(
+            InstructionRange {
+                start: program.instruction_start,
+                end: program.instruction_end,
+            },
+            store.instructions.len(),
+        )?;
+        let mut flattened = String::new();
+        for position in positions {
+            match store
+                .instructions
+                .get(position)
+                .copied()
+                .ok_or(RenderError::InvalidCatalog)?
+            {
+                Instruction::Text { offset, length } => {
+                    flattened.push_str(Self::text(store, offset, length)?);
+                }
+                Instruction::LineBreak => flattened.push('\n'),
+                Instruction::Argument { .. }
+                | Instruction::Plural { .. }
+                | Instruction::Select { .. }
+                | Instruction::Format { .. }
+                | Instruction::Pound => return Err(RenderError::InvalidCatalog),
+            }
+        }
+        if flattened == static_text {
+            Ok(())
+        } else {
+            Err(RenderError::InvalidCatalog)
+        }
     }
 
     fn validate_bindings(

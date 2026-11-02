@@ -20,6 +20,7 @@ impl MessageEmitter {
         messages: &[MessageDef],
         formatted_keys: &BTreeSet<String>,
         atomic_locale: bool,
+        render_error_fallback_enabled: bool,
     ) -> Result<(), String> {
         let plans = Self::build_plans(messages, formatted_keys)?;
         if atomic_locale {
@@ -34,11 +35,11 @@ impl MessageEmitter {
         }
         writeln!(
             output,
-            "use u18n::{{__private::ParsedTag, Catalog, Locale}};\n"
+            "use u18n::{{__private::ParsedTag, Catalog, Locale, LocaleProvider}};\n"
         )
         .map_err(|_| "could not format generated source".to_string())?;
         for plan in &plans {
-            Self::emit_macro(output, plan)
+            Self::emit_macro(output, plan, render_error_fallback_enabled)
                 .map_err(|_| "could not format generated source".to_string())?;
         }
         Ok(())
@@ -68,7 +69,11 @@ impl MessageEmitter {
         Ok(plans)
     }
 
-    fn emit_macro(output: &mut String, plan: &MessagePlan<'_>) -> Result<(), FmtError> {
+    fn emit_macro(
+        output: &mut String,
+        plan: &MessagePlan<'_>,
+        render_error_fallback_enabled: bool,
+    ) -> Result<(), FmtError> {
         writeln!(
             output,
             "/// Renders the `{}` message with its schema-checked arguments.",
@@ -83,6 +88,14 @@ impl MessageEmitter {
             )?;
             Self::emit_invocation(output, plan, "$locale", "$formatter", "$($arguments)*")?;
             writeln!(output, "    }};")?;
+            if render_error_fallback_enabled {
+                writeln!(
+                    output,
+                    "    (@__u18n_dispatch [$locale:expr] [] {{$($arguments:tt)*}}) => {{"
+                )?;
+                Self::emit_invocation(output, plan, "$locale", "", "$($arguments)*")?;
+                writeln!(output, "    }};")?;
+            }
         } else {
             writeln!(
                 output,

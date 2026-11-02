@@ -25,29 +25,35 @@ The compiler rejects duplicate source tags and tags that differ only by ASCII ca
 Generated `LocaleTag` is a closed enum with one variant per included catalog. Variant names
 concatenate normalized subtags in PascalCase (`en` becomes `En`, `es-419` becomes `Es419`). The
 source-locale index compares tags case-insensitively as strings, so source tags are not limited
-to a fixed width. Each CLDR main-parent index row stores one numeric `u64` key: bits 3–55 encode
+to a fixed width. When enabled, each CLDR main-parent index row stores one numeric `u64` key: bits 3–55 encode
 bounded language, script, and region components, while bits 0–2 encode the fixed `ParentLocale`
 discriminant that selects the canonical parent tag. The child layout supports 2- or 3-letter
 languages, an optional 4-letter script, and an optional 2-letter or 3-digit region. Other valid
 BCP 47 forms do not produce a parent-index key.
 
 `LocaleTag::from_str` accepts ASCII case variations of an included tag. A valid tag without an
-exact included catalog returns an unsupported-tag error. Both generated lookup methods validate
-BCP 47 structure and reject version 2 extension sequences. Runtime syntax validation does not
-check ordinary subtag registration, which remains a compile-time IANA check. Well-formed tags
-outside the semantic-code profile can still match an exact source tag. If they do not, fallback
-continues with structural truncation; representable candidates can use the numeric parent index
-at later steps.
+exact included catalog returns an unsupported-tag error. Exact lookup, and the optional fallback
+method when enabled, validate BCP 47 structure and reject version 2 extension sequences. Runtime
+syntax validation does not check ordinary subtag registration, which remains a compile-time IANA
+check. Well-formed tags outside the semantic-code profile can still match an exact source tag. If
+they do not, the optional fallback method continues with structural truncation; representable
+candidates can use the numeric parent index at later steps.
 
 `LocaleTag::as_locale()` returns a small handle containing only the stable locale index and exact
 source tag. It has no reference to a catalog or message table, so generated key macros can use it
-without retaining the dynamic store. `LocaleTag::as_catalog()` remains the explicit route to the
-dynamic-ID catalog API.
+without retaining the dynamic store. Generated `LocaleTag` implements `LocaleProvider`, which
+resolves provider values to this handle. Applications can implement the same trait for local types,
+but the trait must return a generated `Locale` so keyed rendering can validate its index and exact
+source tag. `Locale` and references to any provider implement the trait in the runtime.
+`LocaleTag::as_catalog()` remains the explicit route to the dynamic-ID catalog API.
 
-`LocaleTag::fallback` returns an error for malformed requests. It first tries an exact
-source-locale match, follows CLDR 49 main-component parents when the candidate has a semantic code,
-then tries structural truncation, and selects the lexicographically first included locale if no
-candidate matches. It does not apply aliases, add likely subtags, or change locale identity.
+`LocaleTag::fallback` is generated only when `CompilerOptions::with_locale_tag_fallback(true)` is
+set or the CLI `compile` command receives `--locale-tag-fallback`. With the default options,
+`FromStr` still resolves exact included source tags, ignoring ASCII case. When enabled,
+`LocaleTag::fallback` returns an error for malformed requests. It first tries an exact source-locale
+match, follows CLDR 49 main-component parents when the candidate has a semantic code, then tries
+structural truncation, and selects the lexicographically first included locale if no candidate
+matches. It does not apply aliases, add likely subtags, or change locale identity.
 `ParsedTag` remains the shared borrowed syntax parser. Runtime catalog and formatter locale
 identities remain strings.
 
@@ -137,7 +143,9 @@ The IANA registry and CLDR files are versioned compiler inputs whose expected di
 checked at load time. Generated metadata and the catalog fingerprint record the CLDR version,
 IANA snapshot digest, cardinal-rule digest, ordinal-rule digest, alias digest,
 supplemental-data digest, and extension policy. The fingerprint also includes schema and locale
-source, generation settings, and output-format version (`2`).
+source, generation settings (including `locale-tag-fallback-generation=true|false`), and
+output-format version (`3`). The CLDR supplemental digest remains included because the same file
+provides plural-component parent data even when runtime tag fallback generation is disabled.
 
 The relevant pinned inputs are the [IANA Language Subtag Registry
 snapshot](../crates/u18n-compiler/data/iana-language-subtag-registry.txt), CLDR 49 [cardinal

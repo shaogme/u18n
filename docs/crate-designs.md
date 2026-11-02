@@ -86,9 +86,9 @@ allowing the compiler to explain fallback references to files that failed to par
 
 [`crates/u18n-compiler/src/api.rs`](../crates/u18n-compiler/src/api.rs) is the public facade.
 `CompilationInput` owns the schema and locale source files; `Compiler` exposes `compile`,
-`extract`, and `coverage`; `CompilerOptions` carries string-pool and optional atomic-locale
-settings. Parsing, validation, and code generation share this API, so the CLI and build scripts
-use the same compilation behavior.
+`extract`, and `coverage`; `CompilerOptions` carries string-pool, optional atomic-locale, and
+optional `t!` render-error fallback settings. Parsing, validation, and code generation share this
+API, so the CLI and build scripts use the same compilation behavior.
 
 The implementation is split by phase:
 
@@ -119,14 +119,16 @@ Pinned IANA and CLDR inputs are embedded in the compiler. Loading verifies their
 digests before parsing them. The IANA snapshot validates registered language, script, region,
 variant, extlang, and grandfathered subtags. CLDR aliases and plural-component parent data
 affect plural-rule lookup; the separate main-component parent map drives generated runtime
-catalog selection. The source locale spelling remains the catalog identity.
+catalog selection when locale-tag fallback generation is enabled. The source locale spelling
+remains the catalog identity.
 
 The fingerprint orders locale inputs by source tag. It includes source contents, generation
-settings, output-format version (`2`), CLDR version, IANA registry digest, CLDR cardinal-rule,
+settings, output-format version (`3`), CLDR version, IANA registry digest, CLDR cardinal-rule,
 ordinal-rule, alias, and supplemental-data digests, and the locale extension policy. The
 cardinal-rule and alias digests identify inputs used for plural resolution; the supplemental-data
-digest identifies the main-component parent mappings embedded in generated
-`LocaleTag::fallback`. The string pool uses ordered fragments; overlap optimization is skipped
+digest remains included because it also contains plural-component parent data. When enabled, the
+`locale-tag-fallback-generation` setting controls whether main-component parent mappings and
+`LocaleTag::fallback` are generated. The string pool uses ordered fragments; overlap optimization is skipped
 when its configured limits would make the work excessive. Generated metadata records the format
 version, locale-data identifiers, pool limit, and locale-selection settings.
 
@@ -139,8 +141,10 @@ schema, formatter requirement, lightweight locale expression, that key's shard, 
 arguments.
 
 `invoke_message` parses positional or named arguments, diagnoses invalid arity and named fields,
-and emits typed `ArgumentValue` constructors. For named arguments, it evaluates expressions once
-in written order and only then arranges values into schema order. `dispatch_translation` expands
+and emits typed `ArgumentValue` constructors for parameterized messages. Zero-argument calls go
+directly to the selected shard's static-text accessor without constructing an argument array. For
+named arguments, it evaluates expressions once in written order and only then arranges values into
+schema order. `dispatch_translation` expands
 `t!("key", ...)`: it validates the control-header form, selects an explicit locale or the
 generated atomic current locale, and forwards the call to the key-specific generated macro.
 
@@ -152,15 +156,24 @@ injective encoding for `_`, `-`, and `.`.
 
 [`crates/u18n/src/catalog.rs`](../crates/u18n/src/catalog.rs) defines dynamic shared-store
 records, locale-local message bindings, typed argument values, value wrappers, `Catalog`, the
-lightweight `Locale`, keyed `MessageData` and shard tables, and `RenderError`. Both paths offer
-allocating and sink-writing methods, with formatter variants.
+lightweight `Locale`, the `LocaleProvider` adapter trait, keyed `MessageData` and shard tables,
+`RenderedMessage`, and `RenderError`. `MessageData` accepts providers by value; the renderer still
+uses the resolved `Locale` for shard-index and exact-tag validation.
+Generated zero-argument key macros return `Result<&'static str, RenderError>`; parameterized key
+macros return `Result<String, RenderError>`. The dynamic `Catalog::render` and generic
+`MessageData::render` methods return `RenderedMessage` (`Cow<'static, str>`), borrowed for
+zero-argument messages and owned for parameterized messages. Dynamic callers can call
+`into_owned()` when they always need a `String`. Both paths also offer sink-writing methods, with
+formatter variants.
 
 [`crates/u18n/src/format.rs`](../crates/u18n/src/format.rs) keeps dynamic message-ID lookup
 through sorted locale bindings and explicit fallback links separate from keyed locale-index
 lookup. Both provide borrowed table views to one evaluator that appends text and arguments,
 selects branches, tracks the active plural value for `#`, and calls the caller's `Formatter`. A
 formatter receives the selected locale's authored tag. The runtime supplies no locale-specific
-number, currency, date, or time formatting policy.
+number, currency, date, or time formatting policy. Zero-argument programs carry their complete
+flattened literal text in `MessageProgram::static_text`; their returned-text paths borrow it, and
+their sink paths write it directly without creating an output `String`.
 
 `LineBreak` is lowered to a dedicated `Instruction::LineBreak` with no text-pool reference. The
 shared evaluator writes one LF through the caller's sink for both keyed and dynamic rendering.

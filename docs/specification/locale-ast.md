@@ -5,9 +5,10 @@ bind it to the schema. The public AST types are owned by `u18n-ast`; the indepen
 parser in `u18n-locale` maps locale source directly into them and uses `u18n-locale-tag` for shared
 BCP 47 syntax checks. `u18n-ast` defines data types only and does not parse, validate, or lower
 source. A locale file contains a catalog for one valid BCP 47 locale tag using the recommended
-casing and may name one explicit fallback locale for message inheritance. Generated code also
-provides `LocaleTag::fallback` as a separate runtime catalog-selection helper based on CLDR 49
-main-component parent data. Patterns are parsed into tokens; localized text is never retained as an
+casing and may name one explicit fallback locale for message inheritance. Generated code provides
+`LocaleTag::fallback` only when enabled through the compiler's locale-tag fallback option; it is a
+separate runtime catalog-selection helper based on CLDR 49 main-component parent data. Patterns are
+parsed into tokens; localized text is never retained as an
 opaque message string for the runtime to parse. Locale files have no language-version field; the
 compiler release selects this version 2 grammar, with no version 1 compatibility mode.
 
@@ -57,21 +58,24 @@ IANA registration.
 
 The authored source spelling remains the locale identity and is retained by `LocaleTag::as_str()`,
 the lightweight `Locale` handle, and `CatalogData.locale_tag`. `LocaleTag::as_locale()` selects the
-handle used by generated key macros; `LocaleTag::as_catalog()` selects the dynamic-ID catalog.
+handle explicitly; generated `LocaleTag` also implements the runtime `LocaleProvider` trait for
+direct use by generated key macros. Applications can implement `LocaleProvider` for local types
+that resolve to a generated `Locale`. `LocaleTag::as_catalog()` selects the dynamic-ID catalog.
 Keyed macros use their own message shard and do not retain the global dynamic store. The generated
-source-locale index is sorted by lowercase ASCII tag
-and searched with an ASCII case-insensitive comparison; it has no parent-code width limit.
-Source tags that differ only by ASCII case are rejected as duplicate normalized lookup tags. The
+source-locale index is sorted by lowercase ASCII tag and searched with an ASCII case-insensitive
+comparison; it has no parent-code width limit. Source tags that differ only by ASCII case are
+rejected as duplicate normalized lookup tags. When locale-tag fallback generation is enabled, the
 separate CLDR main-parent index stores one numeric `u64` key per row. Bits 3–55 encode the bounded
 language, optional script, and optional region code; bits 0–2 encode the matching fixed private
 `ParentLocale` discriminant, and bits 56–63 remain zero. The child layout supports 2- or 3-letter
 languages, 4-letter scripts, and 2-letter or 3-digit regions. Rows sort by child code and contain no
 child-tag string records. The enum uses stable `repr(u8)` discriminants and provides canonical
 parent spellings after lookup.
-The compiler requires the pinned 198-child, eight-parent CLDR 49 main-parent map to fit the layout
-and rejects duplicate child codes. `fallback` checks for an exact source locale before consulting
-this index; a candidate outside the semantic profile skips parent lookup and continues with
-structural truncation. CLDR aliases and parent data do not rewrite catalog identity.
+With locale-tag fallback generation enabled, the compiler requires the pinned 198-child,
+eight-parent CLDR 49 main-parent map to fit the layout and rejects duplicate child codes.
+`LocaleTag::fallback` checks for an exact source locale before consulting this index; a candidate
+outside the semantic profile skips parent lookup and continues with structural truncation. CLDR
+aliases and parent data do not rewrite catalog identity.
 Private-use subtags remain part of the exact identity but are dropped as a whole when runtime
 fallback truncates a request; plural-rule lookup removes private use before resolving CLDR rules.
 
@@ -86,14 +90,15 @@ ASCII letter and lowercasing its remaining letters. For example, `en` becomes `E
 collisions are rejected before source emission. The variant set depends on the locale inputs, and
 callers can match exhaustively on it. `from_str` accepts any ASCII casing of an included source tag
 and distinguishes malformed or extension-rejected requests from valid tags without an exact catalog.
-`fallback` returns a parse error for malformed input; it first checks the case-insensitive
-source-locale index, then the numeric semantic CLDR main-parent index when the candidate is
-representable, then tries structural truncation. It returns the lexicographically first source
-locale if no candidate matches. Each parent-index `u64` combines a child code and parent
-discriminant; the enum provides canonical BCP 47 strings for the fallback loop to parse. Private-use
-tails are truncated as a unit, and grandfathered tags are atomic candidates. This enum is separate
-from `ParsedTag`, the borrowed syntax parser, and from locale-tag strings in runtime catalogs and
-formatter requests. The runtime parser checks syntax but does not repeat IANA registration checks.
+`LocaleTag::fallback` is included only when locale-tag fallback generation is enabled. It returns a
+parse error for malformed input; it first checks the case-insensitive source-locale index, then the
+numeric semantic CLDR main-parent index when the candidate is representable, then tries structural
+truncation. It returns the lexicographically first source locale if no candidate matches. Each
+parent-index `u64` combines a child code and parent discriminant; the enum provides canonical BCP 47
+strings for the fallback loop to parse. Private-use tails are truncated as a unit, and
+grandfathered tags are atomic candidates. This enum is separate from `ParsedTag`, the borrowed
+syntax parser, and from locale-tag strings in runtime catalogs and formatter requests. The runtime
+parser checks syntax but does not repeat IANA registration checks.
 
 Within a quoted pattern or plural branch, the following escapes are recognized:
 
@@ -402,10 +407,12 @@ ordinal rules,
 [`supplementalMetadata.xml`](../../crates/u18n-compiler/data/cldr-49/supplementalMetadata.xml) for
 aliases, and [`supplementalData.xml`](../../crates/u18n-compiler/data/cldr-49/supplementalData.xml)
 for parent-locale data. The `plurals` component's map is used only for plural-rule lookup; the
-unqualified main-component map is embedded in generated `LocaleTag::fallback` code for runtime
-catalog selection. The compiler verifies the cardinal-rule, ordinal-rule, alias, and supplemental
-files' SHA-256 digests, records them in generated metadata, and includes them in the catalog
-fingerprint. The output-format version is `2`. The
+unqualified main-component map is embedded in generated `LocaleTag::fallback` code only when
+locale-tag fallback generation is enabled. The compiler verifies the cardinal-rule, ordinal-rule,
+alias, and supplemental files' SHA-256 digests, records them in generated metadata, and includes
+them in the catalog fingerprint. The supplemental digest remains present when the runtime fallback
+API is disabled because plural-rule resolution still uses data from the file. The output-format
+version is `3`. The
 [CLDR 49 cardinal plural rules chart](https://unicode.org/cldr/charts/49/supplemental/language_plural_rules.html)
 provides human-readable cardinal examples. The vendored
 [IANA Language Subtag Registry snapshot](../../crates/u18n-compiler/data/iana-language-subtag-registry.txt)
@@ -430,9 +437,10 @@ Both generated paths store the exact authored source locale tag for formatting. 
 conventions by choosing different catalog handles or formatter implementations. A formatting
 operation returns `FormatterFailed` when the adapter fails and `WriteFailed` when the output sink
 rejects a write. A failed sink write can leave a partial prefix. `Catalog::render_to` streams
-messages without allocating an output `String`; `Catalog::render` remains the allocating convenience
-method for dynamic IDs. Keyed `MessageData::render_to` provides the same streaming behavior for one
-message shard.
+messages without allocating an output `String`. `Catalog::render` returns `RenderedMessage`
+(`Cow<'static, str>`), borrowed for zero-argument messages and owned for parameterized messages;
+call `into_owned()` when a dynamic caller needs an owned `String`. Keyed `MessageData::render_to`
+provides the same streaming behavior for one message shard.
 
 ## Diagnostics
 

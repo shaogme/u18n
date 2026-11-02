@@ -28,10 +28,10 @@ Add the runtime and build-time compiler to your application:
 
 ```toml
 [dependencies]
-u18n = "0.2.0"
+u18n = "0.3.0"
 
 [build-dependencies]
-u18n-compiler = "0.2.0"
+u18n-compiler = "0.3.0"
 ```
 
 Create `schema.u18n`:
@@ -119,6 +119,7 @@ u18n-cli compile \
   --schema schema.u18n \
   --locale locales/en.u18n \
   --locale locales/fr-CA.u18n \
+  --locale-tag-fallback \
   --output catalogs.rs
 
 u18n-cli extract \
@@ -146,6 +147,12 @@ keeps keyed rendering independent from the global dynamic catalog. Applications 
 message IDs at runtime can use `LocaleTag::as_catalog()` and the `Catalog` API instead. Locale
 selection with `LocaleTag::fallback` is separate from message inheritance: it chooses an included
 catalog, while message inheritance follows only the fallback edges written in locale headers.
+`LocaleTag::fallback` and its CLDR main-parent lookup data are omitted by default. Enable them with
+`CompilerOptions::with_locale_tag_fallback(true)` or the compile-only CLI flag
+`--locale-tag-fallback`; exact, case-insensitive `FromStr` lookup remains available without the
+option. Generated metadata records `locale-tag-fallback-generation=true|false`, and the setting
+changes the input fingerprint while keeping the hash domain at `u18n-catalog-input-v3` and the
+output-format version at `3`.
 
 The runtime evaluates plural and select patterns, but it does not implement locale-specific number
 or date formatting. For typed `decimal`, `money`, `date`, `time`, or `instant` operations, implement
@@ -171,6 +178,7 @@ options. See [advanced usage](docs/advance.md#provide-locale-aware-formatting) f
 - [Schema language](docs/specification/schema-ast.md) and [locale language](docs/specification/locale-ast.md)
 - [Compilation and rendering algorithms](docs/specification/algorithms.md) and [CLI reference](docs/specification/cli.md)
 - [Showcase application](examples/showcase/README.md)
+- [Result-returning `t!` example](examples/result-api/README.md)
 
 ## License
 

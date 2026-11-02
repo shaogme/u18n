@@ -6,13 +6,16 @@ pub use data::{
     SelectNode, SharedProgramStore,
 };
 
-use alloc::string::String;
+use alloc::{borrow::Cow, string::String};
 use core::{
     error::Error,
     fmt::{Display, Error as FmtError, Formatter as FmtFormatter, Result as FmtResult, Write},
 };
 
 use crate::format::{Formatter, Renderer};
+
+/// Text returned by a rendering call, borrowed for zero-argument messages and owned otherwise.
+pub type RenderedMessage = Cow<'static, str>;
 
 /// A non-negative integer count used by cardinal plural selectors.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -188,6 +191,12 @@ pub enum ArgumentValue<'a> {
 pub struct Locale {
     index: u32,
     locale_tag: &'static str,
+}
+
+/// Resolves an application locale value to a generated locale identity.
+pub trait LocaleProvider {
+    /// Returns the generated locale handle used to select keyed message programs.
+    fn provide_locale(&self) -> &Locale;
 }
 
 /// A handle to one generated message shard.
@@ -426,52 +435,104 @@ impl Locale {
     }
 }
 
+impl LocaleProvider for Locale {
+    fn provide_locale(&self) -> &Locale {
+        self
+    }
+}
+
+impl<T: LocaleProvider + ?Sized> LocaleProvider for &T {
+    fn provide_locale(&self) -> &Locale {
+        (*self).provide_locale()
+    }
+}
+
 impl MessageData {
     /// Creates a trusted handle for one compiler-generated message shard.
     ///
     /// The caller must ensure that each locale selection and all table references are valid,
-    /// including plural rule sets and their category branches. Rendering trusts those invariants.
+    /// including plural rule sets and their category branches. Every zero-argument program must
+    /// provide `static_text` matching its literal and line-break instructions. Rendering trusts
+    /// those invariants.
     pub const fn new_trusted(shard: MessageShardData) -> Self {
         Self { shard }
     }
 
     /// Renders this message using the selected generated locale.
-    pub fn render(
+    ///
+    /// Zero-argument messages return borrowed static text; messages with schema arguments return
+    /// owned text. Call [`RenderedMessage::into_owned`] when the result must always be a `String`.
+    pub fn render<P: LocaleProvider>(
         &self,
-        locale: &Locale,
+        locale: P,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
+        let locale = locale.provide_locale();
         Renderer::render_message(self, locale, arguments)
     }
 
-    /// Renders this message to a caller-owned sink without allocating an output string.
-    pub fn render_to(
+    /// Returns the selected zero-argument program's compile-time text without allocating.
+    pub fn render_static<P: LocaleProvider>(&self, locale: P) -> Result<&'static str, RenderError> {
+        let locale = locale.provide_locale();
+        Renderer::render_message_static(self, locale)
+    }
+
+    /// Renders this message into an owned string.
+    pub fn render_owned<P: LocaleProvider>(
         &self,
-        locale: &Locale,
+        locale: P,
+        arguments: &[ArgumentValue<'_>],
+    ) -> Result<String, RenderError> {
+        let locale = locale.provide_locale();
+        Renderer::render_message(self, locale, arguments).map(RenderedMessage::into_owned)
+    }
+
+    /// Renders this message to a caller-owned sink without allocating an output string.
+    pub fn render_to<P: LocaleProvider>(
+        &self,
+        locale: P,
         arguments: &[ArgumentValue<'_>],
         output: &mut dyn Write,
     ) -> Result<(), RenderError> {
+        let locale = locale.provide_locale();
         Renderer::render_message_to(self, locale, arguments, None, output)
     }
 
     /// Renders this message with caller-owned locale formatting.
-    pub fn render_with(
+    ///
+    /// Zero-argument messages return borrowed static text because they cannot contain format
+    /// operations. Messages with schema arguments return owned text.
+    pub fn render_with<P: LocaleProvider>(
         &self,
-        locale: &Locale,
+        locale: P,
         formatter: &dyn Formatter,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
+        let locale = locale.provide_locale();
         Renderer::render_message_with(self, locale, formatter, arguments)
     }
 
-    /// Renders this message with caller-owned locale formatting into a caller-owned sink.
-    pub fn render_with_to(
+    /// Renders this message with caller-owned locale formatting into an owned string.
+    pub fn render_with_owned<P: LocaleProvider>(
         &self,
-        locale: &Locale,
+        locale: P,
+        formatter: &dyn Formatter,
+        arguments: &[ArgumentValue<'_>],
+    ) -> Result<String, RenderError> {
+        let locale = locale.provide_locale();
+        Renderer::render_message_with(self, locale, formatter, arguments)
+            .map(RenderedMessage::into_owned)
+    }
+
+    /// Renders this message with caller-owned locale formatting into a caller-owned sink.
+    pub fn render_with_to<P: LocaleProvider>(
+        &self,
+        locale: P,
         formatter: &dyn Formatter,
         arguments: &[ArgumentValue<'_>],
         output: &mut dyn Write,
     ) -> Result<(), RenderError> {
+        let locale = locale.provide_locale();
         Renderer::render_message_to(self, locale, arguments, Some(formatter), output)
     }
 
@@ -523,7 +584,8 @@ impl Catalog {
     /// Creates a trusted handle for immutable tables produced by the compiler.
     ///
     /// The caller must ensure that every table reference and catalog invariant is valid,
-    /// including plural rule sets and their category branches. Rendering trusts those invariants.
+    /// including plural rule sets and their category branches. Every zero-argument message's
+    /// selected program must provide matching `static_text`. Rendering trusts those invariants.
     pub const fn new_trusted(data: CatalogData) -> Self {
         Self { data }
     }
@@ -541,12 +603,14 @@ impl Catalog {
     /// Renders the message addressed by `message_id` using schema-order arguments.
     ///
     /// If the selected locale has no local binding, rendering searches its explicit fallback
-    /// chain for the message's shared program.
+    /// chain for the message's shared program. Zero-argument messages return borrowed static text;
+    /// messages with schema arguments return owned text. Call
+    /// [`RenderedMessage::into_owned`] to normalize the result to a `String`.
     pub fn render(
         &self,
         message_id: u32,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
         Renderer::render(self, message_id, arguments)
     }
 
@@ -577,12 +641,15 @@ impl Catalog {
     }
 
     /// Renders a message using a caller-provided formatting adapter.
+    ///
+    /// Zero-argument messages return borrowed static text because they cannot contain format
+    /// operations. Messages with schema arguments return owned text.
     pub fn render_with(
         &self,
         formatter: &dyn Formatter,
         message_id: u32,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
         Renderer::render_with(self, formatter, message_id, arguments)
     }
 

@@ -1,13 +1,17 @@
-use core::fmt::{Error as FmtError, Result as FmtResult, Write};
+use core::{
+    cell::Cell,
+    fmt::{Error as FmtError, Result as FmtResult, Write},
+};
+use std::borrow::Cow;
 
 use u18n::{
     ArgumentValue, Catalog, CatalogData, Decimal, FormatNode, FormatOptions, FormatRequest,
     FormatStyle, FormatValue, Formatter, FormatterError, Grouping, Instruction, Locale,
-    LocaleProgram, MessageBinding, MessageData, MessageProgram, MessageShardData, MessageSignature,
-    Money, PluralBranchRecord, PluralCategory, PluralConjunction, PluralCount, PluralDecimal,
-    PluralKind, PluralNode, PluralNumber, PluralOperand, PluralPredicate, PluralRange, PluralRule,
-    PluralSelector, Precision, RenderError, Rounding, RuleSet, SelectBranchRecord, SelectNode,
-    SharedProgramStore,
+    LocaleProgram, LocaleProvider, MessageBinding, MessageData, MessageProgram, MessageShardData,
+    MessageSignature, Money, PluralBranchRecord, PluralCategory, PluralConjunction, PluralCount,
+    PluralDecimal, PluralKind, PluralNode, PluralNumber, PluralOperand, PluralPredicate,
+    PluralRange, PluralRule, PluralSelector, Precision, RenderError, Rounding, RuleSet,
+    SelectBranchRecord, SelectNode, SharedProgramStore,
 };
 
 fn shared_store(store: SharedProgramStore) -> &'static SharedProgramStore {
@@ -15,6 +19,11 @@ fn shared_store(store: SharedProgramStore) -> &'static SharedProgramStore {
 }
 
 struct LocaleFormatter;
+
+struct CountingLocaleProvider<'locale> {
+    locale: &'locale Locale,
+    calls: Cell<usize>,
+}
 
 impl Formatter for LocaleFormatter {
     fn format(
@@ -28,6 +37,13 @@ impl Formatter for LocaleFormatter {
                 .map_err(|_| FormatterError::Failed),
             _ => Err(FormatterError::Unsupported),
         }
+    }
+}
+
+impl LocaleProvider for CountingLocaleProvider<'_> {
+    fn provide_locale(&self) -> &Locale {
+        self.calls.set(self.calls.get().saturating_add(1));
+        self.locale
     }
 }
 
@@ -46,6 +62,7 @@ static KEYED_LOCALE_PROGRAMS: [LocaleProgram; 1] = [LocaleProgram {
 static KEYED_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
     instruction_start: 0,
     instruction_end: 1,
+    static_text: Some("Hello"),
 }];
 static KEYED_INSTRUCTIONS: [Instruction; 1] = [Instruction::Text {
     offset: 0,
@@ -111,6 +128,7 @@ static LINE_BREAK_SIGNATURES: [MessageSignature; 1] = [MessageSignature { argume
 static LINE_BREAK_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
     instruction_start: 0,
     instruction_end: 3,
+    static_text: None,
 }];
 static LINE_BREAK_INSTRUCTIONS: [Instruction; 13] = [
     Instruction::Text {
@@ -473,6 +491,7 @@ static TEXT_MESSAGES_SIGNATURES: [MessageSignature; 1] = [MessageSignature { arg
 static TEXT_MESSAGES_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
     instruction_start: 0,
     instruction_end: 3,
+    static_text: None,
 }];
 static TEXT_MESSAGES_BINDINGS: [MessageBinding; 1] = [MessageBinding {
     message_id: 0,
@@ -526,6 +545,7 @@ static PLURAL_MESSAGES_SIGNATURES: [MessageSignature; 1] = [MessageSignature { a
 static PLURAL_MESSAGES_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
     instruction_start: 0,
     instruction_end: 1,
+    static_text: None,
 }];
 static PLURAL_MESSAGES_BINDINGS: [MessageBinding; 1] = [MessageBinding {
     message_id: 0,
@@ -561,6 +581,7 @@ static NESTED_MESSAGES_SIGNATURES: [MessageSignature; 1] = [MessageSignature { a
 static NESTED_MESSAGES_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
     instruction_start: 0,
     instruction_end: 1,
+    static_text: None,
 }];
 static NESTED_MESSAGES_BINDINGS: [MessageBinding; 1] = [MessageBinding {
     message_id: 0,
@@ -612,6 +633,7 @@ static CYCLIC_MESSAGES_SIGNATURES: [MessageSignature; 1] = [MessageSignature { a
 static CYCLIC_MESSAGES_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
     instruction_start: 0,
     instruction_end: 1,
+    static_text: None,
 }];
 static CYCLIC_MESSAGES_BINDINGS: [MessageBinding; 1] = [MessageBinding {
     message_id: 0,
@@ -703,6 +725,7 @@ fn catalog_with_deep_unselected_branch() -> CatalogData {
                 vec![MessageProgram {
                     instruction_start: 0,
                     instruction_end: 1,
+                    static_text: None,
                 }]
                 .into_boxed_slice(),
             ),
@@ -815,17 +838,17 @@ fn renders_text_and_schema_order_arguments() {
 
     assert_eq!(
         catalog.render(0, &[ArgumentValue::String("Ada")]),
-        Ok(String::from("Hello, Ada!"))
+        Ok(Cow::Owned(String::from("Hello, Ada!")))
     );
 
     let amount = 17;
     assert_eq!(
         catalog.render(0, &[ArgumentValue::Number(&amount)]),
-        Ok(String::from("Hello, 17!"))
+        Ok(Cow::Owned(String::from("Hello, 17!")))
     );
     assert_eq!(
         catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(17))]),
-        Ok(String::from("Hello, 17!"))
+        Ok(Cow::Owned(String::from("Hello, 17!")))
     );
 }
 
@@ -848,19 +871,19 @@ fn line_break_instructions_render_identically_in_keyed_and_dynamic_paths() {
 
     assert_eq!(
         catalog.render(0, &singular_arguments),
-        Ok(String::from(singular))
+        Ok(Cow::Owned(String::from(singular)))
     );
     assert_eq!(
         message.render(&locale, &singular_arguments),
-        Ok(String::from(singular))
+        Ok(Cow::Owned(String::from(singular)))
     );
     assert_eq!(
         catalog.render(0, &plural_arguments),
-        Ok(String::from(plural))
+        Ok(Cow::Owned(String::from(plural)))
     );
     assert_eq!(
         message.render(&locale, &plural_arguments),
-        Ok(String::from(plural))
+        Ok(Cow::Owned(String::from(plural)))
     );
 
     let mut dynamic_output = String::new();
@@ -897,9 +920,10 @@ fn line_break_instructions_render_identically_in_keyed_and_dynamic_paths() {
 #[test]
 fn keyed_messages_check_locale_program_and_argument_references() {
     let locale = Locale::new_trusted(0, "en");
+    assert_eq!(KEYED_MESSAGE.render_static(&locale), Ok("Hello"));
     assert_eq!(
         KEYED_MESSAGE.render(&locale, &[]),
-        Ok(String::from("Hello"))
+        Ok(Cow::Borrowed("Hello"))
     );
 
     let mut output = String::new();
@@ -908,11 +932,11 @@ fn keyed_messages_check_locale_program_and_argument_references() {
         .expect("keyed streaming render succeeds");
     assert_eq!(output, "Hello");
     assert_eq!(
-        KEYED_MESSAGE.render(&Locale::new_trusted(0, "fr"), &[]),
+        KEYED_MESSAGE.render(Locale::new_trusted(0, "fr"), &[]),
         Err(RenderError::LocaleMismatch)
     );
     assert_eq!(
-        KEYED_MESSAGE.render(&Locale::new_trusted(1, "fr"), &[]),
+        KEYED_MESSAGE.render(Locale::new_trusted(1, "fr"), &[]),
         Err(RenderError::LocaleOutOfRange)
     );
     assert_eq!(
@@ -941,6 +965,28 @@ fn keyed_messages_check_locale_program_and_argument_references() {
         Err(RenderError::InvalidCatalog)
     );
 
+    let missing_static_text = MessageData::new_trusted(MessageShardData {
+        argument_count: 0,
+        locale_programs: &KEYED_LOCALE_PROGRAMS,
+        text_pool: "Hello",
+        programs: &[MessageProgram {
+            instruction_start: 0,
+            instruction_end: 1,
+            static_text: None,
+        }],
+        instructions: &KEYED_INSTRUCTIONS,
+        plurals: &[],
+        selects: &[],
+        branches: &[],
+        select_branches: &[],
+        formats: &[],
+        rule_sets: &[],
+    });
+    assert_eq!(
+        missing_static_text.render_static(&locale),
+        Err(RenderError::InvalidCatalog)
+    );
+
     let invalid_range = MessageData::new_trusted(MessageShardData {
         argument_count: 0,
         locale_programs: &KEYED_LOCALE_PROGRAMS,
@@ -948,6 +994,7 @@ fn keyed_messages_check_locale_program_and_argument_references() {
         programs: &[MessageProgram {
             instruction_start: 0,
             instruction_end: 2,
+            static_text: Some("Hello"),
         }],
         instructions: &KEYED_INSTRUCTIONS,
         plurals: &[],
@@ -960,6 +1007,75 @@ fn keyed_messages_check_locale_program_and_argument_references() {
     assert_eq!(
         invalid_range.render(&locale, &[]),
         Err(RenderError::InvalidCatalog)
+    );
+}
+
+#[test]
+fn keyed_message_entries_resolve_each_locale_provider_once() {
+    let locale = Locale::new_trusted(0, "en");
+    let provider = CountingLocaleProvider {
+        locale: &locale,
+        calls: Cell::new(0),
+    };
+    let formatter = LocaleFormatter;
+
+    assert_eq!(
+        KEYED_MESSAGE.render(&provider, &[]),
+        Ok(Cow::Borrowed("Hello"))
+    );
+    assert_eq!(provider.calls.get(), 1);
+
+    provider.calls.set(0);
+    assert_eq!(KEYED_MESSAGE.render_static(&provider), Ok("Hello"));
+    assert_eq!(provider.calls.get(), 1);
+
+    provider.calls.set(0);
+    assert_eq!(
+        KEYED_MESSAGE.render_owned(&provider, &[]),
+        Ok(String::from("Hello"))
+    );
+    assert_eq!(provider.calls.get(), 1);
+
+    provider.calls.set(0);
+    let mut output = String::new();
+    assert_eq!(KEYED_MESSAGE.render_to(&provider, &[], &mut output), Ok(()));
+    assert_eq!(output, "Hello");
+    assert_eq!(provider.calls.get(), 1);
+
+    provider.calls.set(0);
+    assert_eq!(
+        KEYED_MESSAGE.render_with(&provider, &formatter, &[]),
+        Ok(Cow::Borrowed("Hello"))
+    );
+    assert_eq!(provider.calls.get(), 1);
+
+    provider.calls.set(0);
+    assert_eq!(
+        KEYED_MESSAGE.render_with_owned(&provider, &formatter, &[]),
+        Ok(String::from("Hello"))
+    );
+    assert_eq!(provider.calls.get(), 1);
+
+    provider.calls.set(0);
+    let mut formatted_output = String::new();
+    assert_eq!(
+        KEYED_MESSAGE.render_with_to(&provider, &formatter, &[], &mut formatted_output),
+        Ok(())
+    );
+    assert_eq!(formatted_output, "Hello");
+    assert_eq!(provider.calls.get(), 1);
+
+    provider.calls.set(0);
+    let shared_provider: &dyn LocaleProvider = &provider;
+    assert_eq!(
+        KEYED_MESSAGE.render(shared_provider, &[]),
+        Ok(Cow::Borrowed("Hello"))
+    );
+    assert_eq!(provider.calls.get(), 1);
+
+    assert_eq!(
+        KEYED_MESSAGE.render(Locale::new_trusted(0, "en"), &[]),
+        Ok(Cow::Borrowed("Hello"))
     );
 }
 
@@ -984,6 +1100,122 @@ fn checked_catalogs_accept_valid_tables() {
     });
 
     assert!(result.is_ok());
+}
+
+#[test]
+fn checked_catalogs_validate_flattened_static_text() {
+    static SIGNATURES: [MessageSignature; 2] = [
+        MessageSignature { argument_count: 0 },
+        MessageSignature { argument_count: 0 },
+    ];
+    static PROGRAMS: [MessageProgram; 2] = [
+        MessageProgram {
+            instruction_start: 0,
+            instruction_end: 3,
+            static_text: Some("你好\n"),
+        },
+        MessageProgram {
+            instruction_start: 3,
+            instruction_end: 3,
+            static_text: Some(""),
+        },
+    ];
+    static INSTRUCTIONS: [Instruction; 3] = [
+        Instruction::Text {
+            offset: 0,
+            length: 3,
+        },
+        Instruction::Text {
+            offset: 3,
+            length: 3,
+        },
+        Instruction::LineBreak,
+    ];
+    static BINDINGS: [MessageBinding; 2] = [
+        MessageBinding {
+            message_id: 0,
+            program_id: 0,
+        },
+        MessageBinding {
+            message_id: 1,
+            program_id: 1,
+        },
+    ];
+    let catalog = Catalog::try_new(CatalogData {
+        locale_tag: "en",
+        fallback: None,
+        bindings: &BINDINGS,
+        shared_store: shared_store(SharedProgramStore {
+            text_pool: "你好",
+            message_signatures: &SIGNATURES,
+            programs: &PROGRAMS,
+            instructions: &INSTRUCTIONS,
+            plurals: &[],
+            selects: &[],
+            branches: &[],
+            select_branches: &[],
+            formats: &[],
+            rule_sets: &[],
+        }),
+    });
+
+    assert!(matches!(
+        catalog,
+        Ok(catalog)
+            if matches!(catalog.render(0, &[]), Ok(Cow::Borrowed("你好\n")))
+                && matches!(catalog.render(1, &[]), Ok(Cow::Borrowed("")))
+    ));
+
+    static BINDING: [MessageBinding; 1] = [MessageBinding {
+        message_id: 0,
+        program_id: 0,
+    }];
+    static ZERO_SIGNATURE: [MessageSignature; 1] = [MessageSignature { argument_count: 0 }];
+    let missing = Catalog::try_new(CatalogData {
+        locale_tag: "en",
+        fallback: None,
+        bindings: &BINDING,
+        shared_store: shared_store(SharedProgramStore {
+            text_pool: "你好",
+            message_signatures: &ZERO_SIGNATURE,
+            programs: &[MessageProgram {
+                instruction_start: 0,
+                instruction_end: 3,
+                static_text: None,
+            }],
+            instructions: &INSTRUCTIONS,
+            plurals: &[],
+            selects: &[],
+            branches: &[],
+            select_branches: &[],
+            formats: &[],
+            rule_sets: &[],
+        }),
+    });
+    assert_eq!(missing.err(), Some(RenderError::InvalidCatalog));
+
+    let mismatched = Catalog::try_new(CatalogData {
+        locale_tag: "en",
+        fallback: None,
+        bindings: &BINDING,
+        shared_store: shared_store(SharedProgramStore {
+            text_pool: "你好",
+            message_signatures: &ZERO_SIGNATURE,
+            programs: &[MessageProgram {
+                instruction_start: 0,
+                instruction_end: 3,
+                static_text: Some("别的文本"),
+            }],
+            instructions: &INSTRUCTIONS,
+            plurals: &[],
+            selects: &[],
+            branches: &[],
+            select_branches: &[],
+            formats: &[],
+            rule_sets: &[],
+        }),
+    });
+    assert_eq!(mismatched.err(), Some(RenderError::InvalidCatalog));
 }
 
 #[test]
@@ -1063,6 +1295,7 @@ fn checked_catalogs_reject_incomplete_plural_category_branches() {
             programs: &[MessageProgram {
                 instruction_start: 0,
                 instruction_end: 1,
+                static_text: None,
             }],
             instructions: &[
                 Instruction::Plural { plural_index: 0 },
@@ -1126,11 +1359,11 @@ fn selects_cardinal_branches_and_renders_pound() {
 
     assert_eq!(
         catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(1))]),
-        Ok(String::from("one 1"))
+        Ok(Cow::Owned(String::from("one 1")))
     );
     assert_eq!(
         catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(2))]),
-        Ok(String::from("many 2"))
+        Ok(Cow::Owned(String::from("many 2")))
     );
 }
 
@@ -1145,14 +1378,17 @@ fn preserves_plural_decimal_scale_for_rules_interpolation_and_pound() {
         MessageProgram {
             instruction_start: 0,
             instruction_end: 1,
+            static_text: None,
         },
         MessageProgram {
             instruction_start: 11,
             instruction_end: 12,
+            static_text: None,
         },
         MessageProgram {
             instruction_start: 12,
             instruction_end: 13,
+            static_text: None,
         },
     ];
     static MESSAGES_BINDINGS: [MessageBinding; 3] = [
@@ -1272,18 +1508,18 @@ fn preserves_plural_decimal_scale_for_rules_interpolation_and_pound() {
         let value = PluralDecimal::new(value, scale).expect("valid plural decimal");
         assert_eq!(
             catalog.render(0, &[ArgumentValue::PluralDecimal(value)]),
-            Ok(String::from(expected))
+            Ok(Cow::Owned(String::from(expected)))
         );
     }
 
     let value = PluralDecimal::new(150, 2).expect("valid plural decimal");
     assert_eq!(
         catalog.render(1, &[ArgumentValue::PluralDecimal(value)]),
-        Ok(String::from("1.50"))
+        Ok(Cow::Owned(String::from("1.50")))
     );
     assert_eq!(
         catalog.render_with(&LocaleFormatter, 2, &[ArgumentValue::PluralDecimal(value)]),
-        Ok(String::from("en:150"))
+        Ok(Cow::Owned(String::from("en:150")))
     );
     assert_eq!(PluralDecimal::new(-1, 0), None);
     assert_eq!(PluralDecimal::new(1, 39), None);
@@ -1295,6 +1531,7 @@ fn evaluates_exact_decimal_modulo_and_in_vs_within() {
     static MESSAGES_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
         instruction_start: 0,
         instruction_end: 1,
+        static_text: None,
     }];
     static MESSAGES_BINDINGS: [MessageBinding; 1] = [MessageBinding {
         message_id: 0,
@@ -1363,11 +1600,20 @@ fn evaluates_exact_decimal_modulo_and_in_vs_within() {
         )
     };
 
-    assert_eq!(catalog.render(0, &[decimal(115)]), Ok(String::from("one")));
-    assert_eq!(catalog.render(0, &[decimal(15)]), Ok(String::from("other")));
+    assert_eq!(
+        catalog.render(0, &[decimal(115)]),
+        Ok(Cow::Owned(String::from("one")))
+    );
+    assert_eq!(
+        catalog.render(0, &[decimal(15)]),
+        Ok(Cow::Owned(String::from("other")))
+    );
     let boundary =
         ArgumentValue::PluralDecimal(PluralDecimal::new(149, 2).expect("valid plural decimal"));
-    assert_eq!(catalog.render(0, &[boundary]), Ok(String::from("other")));
+    assert_eq!(
+        catalog.render(0, &[boundary]),
+        Ok(Cow::Owned(String::from("other")))
+    );
 }
 
 #[test]
@@ -1398,7 +1644,7 @@ fn nested_pound_uses_the_innermost_selector() {
                 ArgumentValue::PluralCount(PluralCount::new(1)),
             ],
         ),
-        Ok(String::from("1"))
+        Ok(Cow::Owned(String::from("1")))
     );
 }
 
@@ -1408,6 +1654,7 @@ fn nested_decimal_pound_restores_the_outer_value_after_inner_selection() {
     static MESSAGES_PROGRAMS: [MessageProgram; 1] = [MessageProgram {
         instruction_start: 0,
         instruction_end: 1,
+        static_text: None,
     }];
     static MESSAGES_BINDINGS: [MessageBinding; 1] = [MessageBinding {
         message_id: 0,
@@ -1494,7 +1741,7 @@ fn nested_decimal_pound_restores_the_outer_value_after_inner_selection() {
                 ArgumentValue::PluralCount(PluralCount::new(1)),
             ],
         ),
-        Ok(String::from("1.50 1 1.50"))
+        Ok(Cow::Owned(String::from("1.50 1 1.50")))
     );
 }
 
@@ -1541,7 +1788,7 @@ fn rejects_runtime_catalogs_that_exceed_plural_nesting_limit() {
     );
     assert_eq!(
         message.render(
-            &Locale::new_trusted(0, "en"),
+            Locale::new_trusted(0, "en"),
             &[ArgumentValue::PluralCount(PluralCount::new(2))]
         ),
         Err(RenderError::InvalidCatalog)
@@ -1562,6 +1809,7 @@ fn exact_catalog_data() -> CatalogData {
             programs: &[MessageProgram {
                 instruction_start: 0,
                 instruction_end: 1,
+                static_text: None,
             }],
             instructions: &[
                 Instruction::Plural { plural_index: 0 },
@@ -1633,6 +1881,7 @@ fn select_catalog_data() -> CatalogData {
             programs: &[MessageProgram {
                 instruction_start: 0,
                 instruction_end: 1,
+                static_text: None,
             }],
             instructions: &[
                 Instruction::Select { select_index: 0 },
@@ -1689,7 +1938,7 @@ fn exact_plural_cases_precede_cardinal_categories() {
     for (count, expected) in [(0, "zero"), (1, "exact"), (3, "other"), (1, "exact")] {
         assert_eq!(
             catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(count))]),
-            Ok(String::from(expected))
+            Ok(Cow::Owned(String::from(expected)))
         );
     }
 }
@@ -1700,15 +1949,15 @@ fn selects_exact_string_cases_and_uses_other_for_unmatched_values() {
 
     assert_eq!(
         catalog.render(0, &[ArgumentValue::String("female")]),
-        Ok(String::from("She"))
+        Ok(Cow::Owned(String::from("She")))
     );
     assert_eq!(
         catalog.render(0, &[ArgumentValue::String("male")]),
-        Ok(String::from("He"))
+        Ok(Cow::Owned(String::from("He")))
     );
     assert_eq!(
         catalog.render(0, &[ArgumentValue::String("unknown")]),
-        Ok(String::from("They"))
+        Ok(Cow::Owned(String::from("They")))
     );
     assert_eq!(
         catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(1))]),
@@ -1731,6 +1980,7 @@ fn checked_catalogs_reject_pound_inside_top_level_select_cases() {
             programs: &[MessageProgram {
                 instruction_start: 0,
                 instruction_end: 1,
+                static_text: None,
             }],
             instructions: &[Instruction::Select { select_index: 0 }, Instruction::Pound],
             plurals: &[],
@@ -1769,6 +2019,7 @@ fn checked_catalogs_revalidate_shared_selects_in_each_pound_context() {
             programs: &[MessageProgram {
                 instruction_start: 0,
                 instruction_end: 2,
+                static_text: None,
             }],
             instructions: &[
                 Instruction::Plural { plural_index: 0 },
@@ -1867,6 +2118,7 @@ fn renders_formatted_values_to_a_caller_sink_and_distinguishes_failures() {
             programs: &[MessageProgram {
                 instruction_start: 0,
                 instruction_end: 1,
+                static_text: None,
             }],
             instructions: &[Instruction::Format { format_index: 0 }],
             plurals: &[],
@@ -1984,10 +2236,12 @@ fn checked_catalogs_validate_every_table_and_trusted_catalogs_render_selected_pa
                 MessageProgram {
                     instruction_start: 0,
                     instruction_end: 1,
+                    static_text: Some("x"),
                 },
                 MessageProgram {
                     instruction_start: 1,
                     instruction_end: 2,
+                    static_text: Some("x"),
                 },
             ],
             instructions: &[
@@ -2021,6 +2275,7 @@ fn checked_catalogs_validate_every_table_and_trusted_catalogs_render_selected_pa
             programs: &[MessageProgram {
                 instruction_start: 0,
                 instruction_end: 1,
+                static_text: None,
             }],
             instructions: &[
                 Instruction::Plural { plural_index: 0 },
@@ -2061,11 +2316,11 @@ fn checked_catalogs_validate_every_table_and_trusted_catalogs_render_selected_pa
 
     assert_eq!(
         invalid_message_catalog.render(0, &[]),
-        Ok(String::from("x"))
+        Ok(Cow::Owned(String::from("x")))
     );
     assert_eq!(
         invalid_branch_catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(1))]),
-        Ok(String::from("x"))
+        Ok(Cow::Owned(String::from("x")))
     );
     assert!(matches!(
         Catalog::try_new(CatalogData {
@@ -2090,11 +2345,13 @@ fn checked_catalogs_validate_every_table_and_trusted_catalogs_render_selected_pa
                 programs: &[
                     MessageProgram {
                         instruction_start: 0,
-                        instruction_end: 1
+                        instruction_end: 1,
+                        static_text: Some("x"),
                     },
                     MessageProgram {
                         instruction_start: 1,
-                        instruction_end: 2
+                        instruction_end: 2,
+                        static_text: Some("x"),
                     }
                 ],
                 instructions: &[
@@ -2130,7 +2387,8 @@ fn checked_catalogs_validate_every_table_and_trusted_catalogs_render_selected_pa
                 message_signatures: &[MessageSignature { argument_count: 1 }],
                 programs: &[MessageProgram {
                     instruction_start: 0,
-                    instruction_end: 1
+                    instruction_end: 1,
+                    static_text: None,
                 }],
                 instructions: &[
                     Instruction::Plural { plural_index: 0 },
@@ -2192,10 +2450,12 @@ static FALLBACK_PROGRAMS: [MessageProgram; 2] = [
     MessageProgram {
         instruction_start: 0,
         instruction_end: 1,
+        static_text: None,
     },
     MessageProgram {
         instruction_start: 1,
         instruction_end: 2,
+        static_text: None,
     },
 ];
 static FALLBACK_BINDINGS: [MessageBinding; 2] = [
@@ -2341,11 +2601,11 @@ fn sparse_fallback_lookup_preserves_author_rules_and_selected_formatter_locale()
 
     assert_eq!(
         catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(0))]),
-        Ok(String::from("other"))
+        Ok(Cow::Owned(String::from("other")))
     );
     assert_eq!(
         catalog.render(0, &[ArgumentValue::PluralCount(PluralCount::new(1))]),
-        Ok(String::from("one"))
+        Ok(Cow::Owned(String::from("one")))
     );
     assert_eq!(
         CANADIAN_FRENCH_CATALOG.render(0, &[ArgumentValue::PluralCount(PluralCount::new(0))]),
@@ -2357,7 +2617,7 @@ fn sparse_fallback_lookup_preserves_author_rules_and_selected_formatter_locale()
             1,
             &[ArgumentValue::Decimal(Decimal::new(1995, 2))]
         ),
-        Ok(String::from("fr-CA:1995"))
+        Ok(Cow::Owned(String::from("fr-CA:1995")))
     );
 }
 

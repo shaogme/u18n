@@ -20,7 +20,9 @@ pub(super) struct Arguments {
     pool_limit: usize,
     source_locale: Option<String>,
     atomic_locale: bool,
+    locale_tag_fallback: bool,
     final_fallback_locale: Option<String>,
+    render_error_fallback_message: Option<String>,
 }
 
 impl Arguments {
@@ -52,8 +54,16 @@ impl Arguments {
         self.atomic_locale
     }
 
+    pub(super) fn locale_tag_fallback(&self) -> bool {
+        self.locale_tag_fallback
+    }
+
     pub(super) fn final_fallback_locale(&self) -> Option<&str> {
         self.final_fallback_locale.as_deref()
+    }
+
+    pub(super) fn render_error_fallback_message(&self) -> Option<&str> {
+        self.render_error_fallback_message.as_deref()
     }
 }
 
@@ -86,7 +96,10 @@ impl ArgumentsParser {
         let mut source_locale = None;
         let mut atomic_locale = false;
         let mut atomic_seen = false;
+        let mut locale_tag_fallback = false;
+        let mut locale_tag_fallback_seen = false;
         let mut final_fallback_locale = None;
+        let mut render_error_fallback_message = None;
         while let Some(option) = values.next() {
             let Some(option) = option.to_str() else {
                 return Err("command-line option is not valid UTF-8".to_string());
@@ -105,6 +118,16 @@ impl ArgumentsParser {
                     atomic_seen = true;
                     atomic_locale = true;
                 }
+                "--locale-tag-fallback" => {
+                    if command != Command::Compile {
+                        return Err("--locale-tag-fallback is only valid for compile".to_string());
+                    }
+                    if locale_tag_fallback_seen {
+                        return Err("duplicate --locale-tag-fallback option".to_string());
+                    }
+                    locale_tag_fallback_seen = true;
+                    locale_tag_fallback = true;
+                }
                 "--final-fallback" => {
                     if command != Command::Compile {
                         return Err("--final-fallback is only valid for compile".to_string());
@@ -122,6 +145,23 @@ impl ArgumentsParser {
                         return Err("--final-fallback requires a locale tag".to_string());
                     }
                     final_fallback_locale = Some(value.to_string());
+                }
+                "--render-error-fallback-message" => {
+                    if command != Command::Compile {
+                        return Err(
+                            "--render-error-fallback-message is only valid for compile".to_string()
+                        );
+                    }
+                    if render_error_fallback_message.is_some() {
+                        return Err("duplicate --render-error-fallback-message option".to_string());
+                    }
+                    let value = values.next().ok_or_else(|| {
+                        "--render-error-fallback-message requires text".to_string()
+                    })?;
+                    let value = value.to_str().ok_or_else(|| {
+                        "render error fallback message is not valid UTF-8".to_string()
+                    })?;
+                    render_error_fallback_message = Some(value.to_string());
                 }
                 "--source-locale" if command == Command::Extract => {
                     let value = values
@@ -169,7 +209,9 @@ impl ArgumentsParser {
             pool_limit,
             source_locale,
             atomic_locale,
+            locale_tag_fallback,
             final_fallback_locale,
+            render_error_fallback_message,
         }))
     }
 
@@ -184,6 +226,6 @@ impl ArgumentsParser {
     }
 
     fn usage() -> String {
-        "usage: u18n-cli compile --schema FILE --locale FILE... [--atomic --final-fallback TAG] [--output FILE] [--pool-limit N]\n       --final-fallback requires --atomic and must name an input locale catalog\n       u18n-cli extract --schema FILE --locale FILE... --source-locale TAG [--output FILE]\n       u18n-cli coverage --schema FILE --locale FILE... [--output FILE]\n       u18n-cli --help".to_string()
+        "usage: u18n-cli compile --schema FILE --locale FILE... [--locale-tag-fallback] [--atomic --final-fallback TAG] [--render-error-fallback-message TEXT] [--output FILE] [--pool-limit N]\n       --locale-tag-fallback, --atomic, --final-fallback, and --render-error-fallback-message are only valid for compile\n       --final-fallback requires --atomic and must name an input locale catalog\n       u18n-cli extract --schema FILE --locale FILE... --source-locale TAG [--output FILE]\n       u18n-cli coverage --schema FILE --locale FILE... [--output FILE]\n       u18n-cli --help".to_string()
     }
 }

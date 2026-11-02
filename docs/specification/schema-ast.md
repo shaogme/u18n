@@ -169,12 +169,13 @@ Parsing establishes syntax; schema validation establishes these semantic propert
    calls accept Rust expressions, including brace-delimited block expressions, require exactly the
    schema arity, and may have a trailing comma. Named calls require every
    declared parameter and reject unknown or duplicate fields. The two forms cannot be mixed. A
-   zero-parameter message accepts the locale handle alone or an empty named form `{}`. Every value is
-   statically checked against its schema type, including `number` values implementing
-   `core::fmt::Display`; the result is `Result<String, RenderError>`.
+   zero-parameter message accepts a `LocaleProvider` value alone or an empty named form `{}`.
+   Every value is statically checked against its schema type, including `number` values implementing
+   `core::fmt::Display`; parameterized macros return `Result<String, RenderError>`, while
+   zero-parameter macros return `Result<&'static str, RenderError>`.
 8. If any compiled locale's resolved pattern uses a formatting operation for a message, its macro
-   takes a locale handle, then a caller-provided formatter, then either argument form. Other
-   messages accept only the locale handle and arguments. Each generated macro refers directly to
+   takes a locale provider, then a caller-provided formatter, then either argument form. Other
+   messages accept only the provider and arguments. Each generated macro refers directly to
    that key's message shard and does not pass a global numeric message ID to the runtime. The
    expansion evaluates the locale once, then the formatter when required, then argument expressions
    once in their written order. Named values are reordered only after evaluation to construct the

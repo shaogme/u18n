@@ -1,8 +1,10 @@
-use alloc::string::String;
+mod render_context;
+
+use alloc::{borrow::Cow, string::String};
 use core::{
     convert::TryFrom,
     error::Error,
-    fmt::{Display, Error as FmtError, Formatter as FmtFormatter, Result as FmtResult, Write},
+    fmt::{Display, Formatter as FmtFormatter, Result as FmtResult, Write},
     ops::Range,
     ptr,
 };
@@ -12,12 +14,14 @@ use crate::{
     catalog::{
         ArgumentValue, Catalog, CatalogData, Decimal, FormatNode, FormatOptions, FormatRequest,
         FormatValue, Instruction, Locale, MessageData, MessageProgram, MessageShardData,
-        PluralBranchRecord, PluralDecimal, PluralNode, PluralSelector, SelectBranchRecord,
-        SelectNode, SharedProgramStore,
+        MessageSignature, PluralBranchRecord, PluralNode, PluralSelector, RenderedMessage,
+        SelectBranchRecord, SelectNode,
     },
     plural::{PluralNumber, RuleEvaluator, RuleSet},
     validation::{CatalogValidator, InstructionRange, MAX_SELECTOR_NESTING},
 };
+
+use render_context::{ActivePluralValue, ProgramTables, RenderContext, TrackingWriter};
 
 /// A failure reported by a caller-provided locale formatter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,108 +54,6 @@ pub trait Formatter {
     ) -> Result<(), FormatterError>;
 }
 
-#[derive(Clone, Copy)]
-struct ProgramTables<'tables> {
-    text_pool: &'tables str,
-    instructions: &'tables [Instruction],
-    plurals: &'tables [PluralNode],
-    selects: &'tables [SelectNode],
-    branches: &'tables [PluralBranchRecord],
-    select_branches: &'tables [SelectBranchRecord],
-    formats: &'tables [FormatNode],
-    rule_sets: &'tables [RuleSet],
-}
-
-struct RenderContext<'catalog, 'arguments, 'value> {
-    locale_tag: &'catalog str,
-    tables: ProgramTables<'catalog>,
-    arguments: &'arguments [ArgumentValue<'value>],
-    formatter: Option<&'catalog dyn Formatter>,
-}
-
-impl<'tables> ProgramTables<'tables> {
-    fn from_shared(store: &'tables SharedProgramStore) -> Self {
-        Self {
-            text_pool: store.text_pool,
-            instructions: store.instructions,
-            plurals: store.plurals,
-            selects: store.selects,
-            branches: store.branches,
-            select_branches: store.select_branches,
-            formats: store.formats,
-            rule_sets: store.rule_sets,
-        }
-    }
-
-    fn from_shard(shard: &'tables MessageShardData) -> Self {
-        Self {
-            text_pool: shard.text_pool,
-            instructions: shard.instructions,
-            plurals: shard.plurals,
-            selects: shard.selects,
-            branches: shard.branches,
-            select_branches: shard.select_branches,
-            formats: shard.formats,
-            rule_sets: shard.rule_sets,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ActivePluralValue {
-    display: PluralDecimal,
-    number: PluralNumber,
-}
-
-impl ActivePluralValue {
-    fn from_decimal(value: PluralDecimal) -> Self {
-        Self {
-            display: value,
-            number: PluralNumber {
-                coefficient: value.coefficient() as u128,
-                scale: value.scale(),
-            },
-        }
-    }
-
-    fn from_integer(value: u64) -> Result<Self, RenderError> {
-        let coefficient = i128::from(value);
-        let display = PluralDecimal::new(coefficient, 0).ok_or(RenderError::InvalidCatalog)?;
-        Ok(Self::from_decimal(display))
-    }
-}
-
-struct TrackingWriter<'a> {
-    output: &'a mut dyn Write,
-    failed: bool,
-}
-
-impl TrackingWriter<'_> {
-    fn result(&self, result: Result<(), FmtError>) -> Result<(), RenderError> {
-        if result.is_err() && self.failed {
-            Err(RenderError::WriteFailed)
-        } else if result.is_err() {
-            Err(RenderError::FormattingFailed)
-        } else if self.failed {
-            Err(RenderError::WriteFailed)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Write for TrackingWriter<'_> {
-    fn write_str(&mut self, value: &str) -> FmtResult {
-        match self.output.write_str(value) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                self.failed = true;
-                Err(error)
-            }
-        }
-    }
-}
-
 pub(crate) struct Renderer;
 
 impl Renderer {
@@ -163,10 +65,25 @@ impl Renderer {
         catalog: &Catalog,
         message_id: u32,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
+        let signature = Self::message_signature(catalog, message_id)?;
+        Self::validate_arguments(signature.argument_count, arguments)?;
+        let program = Self::lookup_program(catalog, message_id)?;
+        if signature.argument_count == 0 {
+            return Ok(Cow::Borrowed(
+                program.static_text.ok_or(RenderError::InvalidCatalog)?,
+            ));
+        }
         let mut output = String::new();
-        Self::render_to(catalog, message_id, arguments, None, &mut output)?;
-        Ok(output)
+        let data = catalog.data();
+        let context = RenderContext {
+            locale_tag: data.locale_tag,
+            tables: ProgramTables::from_shared(data.shared_store),
+            arguments,
+            formatter: None,
+        };
+        Self::render_program_to(program, &context, &mut output)?;
+        Ok(Cow::Owned(output))
     }
 
     pub(crate) fn render_with(
@@ -174,10 +91,25 @@ impl Renderer {
         formatter: &dyn Formatter,
         message_id: u32,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
+        let signature = Self::message_signature(catalog, message_id)?;
+        Self::validate_arguments(signature.argument_count, arguments)?;
+        let program = Self::lookup_program(catalog, message_id)?;
+        if signature.argument_count == 0 {
+            return Ok(Cow::Borrowed(
+                program.static_text.ok_or(RenderError::InvalidCatalog)?,
+            ));
+        }
         let mut output = String::new();
-        Self::render_to(catalog, message_id, arguments, Some(formatter), &mut output)?;
-        Ok(output)
+        let data = catalog.data();
+        let context = RenderContext {
+            locale_tag: data.locale_tag,
+            tables: ProgramTables::from_shared(data.shared_store),
+            arguments,
+            formatter: Some(formatter),
+        };
+        Self::render_program_to(program, &context, &mut output)?;
+        Ok(Cow::Owned(output))
     }
 
     pub(crate) fn render_to(
@@ -188,36 +120,43 @@ impl Renderer {
         output: &mut dyn Write,
     ) -> Result<(), RenderError> {
         let data = catalog.data();
-        let message_index =
-            usize::try_from(message_id).map_err(|_| RenderError::MessageOutOfRange)?;
-        let signature = data
-            .shared_store
-            .message_signatures
-            .get(message_index)
-            .ok_or(RenderError::MessageOutOfRange)?;
-        let program = Self::lookup_program(catalog, message_id)?;
+        let signature = Self::message_signature(catalog, message_id)?;
         Self::validate_arguments(signature.argument_count, arguments)?;
+        let program = Self::lookup_program(catalog, message_id)?;
+        if signature.argument_count == 0 {
+            return Self::write_static_text(
+                program.static_text.ok_or(RenderError::InvalidCatalog)?,
+                output,
+            );
+        }
         let context = RenderContext {
             locale_tag: data.locale_tag,
             tables: ProgramTables::from_shared(data.shared_store),
             arguments,
             formatter,
         };
-        let mut tracked = TrackingWriter {
-            output,
-            failed: false,
-        };
-        Self::render_program(&mut tracked, &context, program)
+        Self::render_program_to(program, &context, output)
     }
 
     pub(crate) fn render_message(
         message: &MessageData,
         locale: &Locale,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
+        let (shard, program) = Self::lookup_message_program(message, locale)?;
+        Self::validate_arguments(shard.argument_count, arguments)?;
+        if shard.argument_count == 0 {
+            return Ok(Cow::Borrowed(Self::message_static_text(shard, program)?));
+        }
         let mut output = String::new();
-        Self::render_message_to(message, locale, arguments, None, &mut output)?;
-        Ok(output)
+        let context = RenderContext {
+            locale_tag: locale.as_str(),
+            tables: ProgramTables::from_shard(shard),
+            arguments,
+            formatter: None,
+        };
+        Self::render_program_to(program, &context, &mut output)?;
+        Ok(Cow::Owned(output))
     }
 
     pub(crate) fn render_message_with(
@@ -225,10 +164,32 @@ impl Renderer {
         locale: &Locale,
         formatter: &dyn Formatter,
         arguments: &[ArgumentValue<'_>],
-    ) -> Result<String, RenderError> {
+    ) -> Result<RenderedMessage, RenderError> {
+        let (shard, program) = Self::lookup_message_program(message, locale)?;
+        Self::validate_arguments(shard.argument_count, arguments)?;
+        if shard.argument_count == 0 {
+            return Ok(Cow::Borrowed(Self::message_static_text(shard, program)?));
+        }
         let mut output = String::new();
-        Self::render_message_to(message, locale, arguments, Some(formatter), &mut output)?;
-        Ok(output)
+        let context = RenderContext {
+            locale_tag: locale.as_str(),
+            tables: ProgramTables::from_shard(shard),
+            arguments,
+            formatter: Some(formatter),
+        };
+        Self::render_program_to(program, &context, &mut output)?;
+        Ok(Cow::Owned(output))
+    }
+
+    pub(crate) fn render_message_static(
+        message: &MessageData,
+        locale: &Locale,
+    ) -> Result<&'static str, RenderError> {
+        let (shard, program) = Self::lookup_message_program(message, locale)?;
+        if shard.argument_count != 0 {
+            return Err(RenderError::ArgumentCountMismatch);
+        }
+        Self::message_static_text(shard, program)
     }
 
     pub(crate) fn render_message_to(
@@ -238,6 +199,24 @@ impl Renderer {
         formatter: Option<&dyn Formatter>,
         output: &mut dyn Write,
     ) -> Result<(), RenderError> {
+        let (shard, program) = Self::lookup_message_program(message, locale)?;
+        Self::validate_arguments(shard.argument_count, arguments)?;
+        if shard.argument_count == 0 {
+            return Self::write_static_text(Self::message_static_text(shard, program)?, output);
+        }
+        let context = RenderContext {
+            locale_tag: locale.as_str(),
+            tables: ProgramTables::from_shard(shard),
+            arguments,
+            formatter,
+        };
+        Self::render_program_to(program, &context, output)
+    }
+
+    fn lookup_message_program<'message>(
+        message: &'message MessageData,
+        locale: &Locale,
+    ) -> Result<(&'message MessageShardData, &'message MessageProgram), RenderError> {
         let shard = message.shard();
         let locale_index =
             usize::try_from(locale.index()).map_err(|_| RenderError::LocaleOutOfRange)?;
@@ -254,18 +233,44 @@ impl Renderer {
             .programs
             .get(program_index)
             .ok_or(RenderError::InvalidCatalog)?;
-        Self::validate_arguments(shard.argument_count, arguments)?;
-        let context = RenderContext {
-            locale_tag: locale.as_str(),
-            tables: ProgramTables::from_shard(shard),
-            arguments,
-            formatter,
-        };
-        let mut tracked = TrackingWriter {
-            output,
-            failed: false,
-        };
-        Self::render_program(&mut tracked, &context, program)
+        Ok((shard, program))
+    }
+
+    fn message_signature(
+        catalog: &Catalog,
+        message_id: u32,
+    ) -> Result<&MessageSignature, RenderError> {
+        let message_index =
+            usize::try_from(message_id).map_err(|_| RenderError::MessageOutOfRange)?;
+        catalog
+            .data()
+            .shared_store
+            .message_signatures
+            .get(message_index)
+            .ok_or(RenderError::MessageOutOfRange)
+    }
+
+    fn message_static_text(
+        shard: &MessageShardData,
+        program: &MessageProgram,
+    ) -> Result<&'static str, RenderError> {
+        Self::checked_range(
+            InstructionRange {
+                start: program.instruction_start,
+                end: program.instruction_end,
+            },
+            shard.instructions.len(),
+        )?;
+        program.static_text.ok_or(RenderError::InvalidCatalog)
+    }
+
+    fn write_static_text(text: &'static str, output: &mut dyn Write) -> Result<(), RenderError> {
+        if text.is_empty() {
+            return Ok(());
+        }
+        let mut tracked = TrackingWriter::new(output);
+        let result = tracked.write_str(text);
+        tracked.result(result)
     }
 
     fn render_program(
@@ -283,6 +288,15 @@ impl Renderer {
             None,
             0,
         )
+    }
+
+    fn render_program_to(
+        program: &MessageProgram,
+        context: &RenderContext<'_, '_, '_>,
+        output: &mut dyn Write,
+    ) -> Result<(), RenderError> {
+        let mut tracked = TrackingWriter::new(output);
+        Self::render_program(&mut tracked, context, program)
     }
 
     fn validate_arguments(
@@ -340,7 +354,7 @@ impl Renderer {
         active_count: Option<ActivePluralValue>,
         plural_depth: usize,
     ) -> Result<(), RenderError> {
-        let instructions = context.tables.instructions;
+        let instructions = context.tables.instructions();
         let positions = Self::checked_range(range, instructions.len())?;
         let selected = instructions
             .get(positions)
@@ -348,7 +362,7 @@ impl Renderer {
         for instruction in selected {
             match instruction {
                 Instruction::Text { offset, length } => {
-                    Self::append_text(output, context.tables.text_pool, *offset, *length)?;
+                    Self::append_text(output, context.tables.text_pool(), *offset, *length)?;
                 }
                 Instruction::LineBreak => {
                     let result = output.write_str("\n");
@@ -380,7 +394,7 @@ impl Renderer {
                 }
                 Instruction::Pound => {
                     let count = active_count.ok_or(RenderError::PoundOutsidePlural)?;
-                    let result = write!(output, "{}", count.display);
+                    let result = write!(output, "{}", count.display());
                     output.result(result)?;
                 }
             }
@@ -452,7 +466,7 @@ impl Renderer {
         let index = usize::try_from(format_index).map_err(|_| RenderError::InvalidCatalog)?;
         let node = context
             .tables
-            .formats
+            .formats()
             .get(index)
             .ok_or(RenderError::InvalidCatalog)?;
         let argument_index =
@@ -468,12 +482,9 @@ impl Renderer {
             value,
             options: node.options,
         };
-        let mut adapter_output = TrackingWriter {
-            output,
-            failed: false,
-        };
+        let mut adapter_output = TrackingWriter::new(output);
         let result = formatter.format(request, &mut adapter_output);
-        if adapter_output.failed {
+        if adapter_output.has_failed_write() {
             return Err(RenderError::WriteFailed);
         }
         if result.is_err() {
@@ -518,11 +529,11 @@ impl Renderer {
         let index = usize::try_from(plural_index).map_err(|_| RenderError::InvalidCatalog)?;
         let plural = context
             .tables
-            .plurals
+            .plurals()
             .get(index)
             .ok_or(RenderError::InvalidCatalog)?;
         let count = Self::plural_argument(context, plural)?;
-        if let Some(exact) = Self::exact_integer(count.number)?
+        if let Some(exact) = Self::exact_integer(count.number())?
             && let Some(branch) = Self::find_exact_branch(context, plural, exact)?
         {
             return Self::render_range(
@@ -537,7 +548,7 @@ impl Renderer {
             );
         }
         let rule_set = Self::rule_set(context, plural)?;
-        let category = RuleEvaluator::select(rule_set, count.number)?;
+        let category = RuleEvaluator::select(rule_set, count.number())?;
         let branch = Self::find_branch(context, plural, category)?;
         Self::render_range(
             output,
@@ -561,7 +572,7 @@ impl Renderer {
         let index = usize::try_from(select_index).map_err(|_| RenderError::InvalidCatalog)?;
         let node = context
             .tables
-            .selects
+            .selects()
             .get(index)
             .ok_or(RenderError::InvalidCatalog)?;
         let value = Self::select_argument(context, node)?;
@@ -601,17 +612,17 @@ impl Renderer {
                 start: select.branch_start,
                 end: select.branch_end,
             },
-            context.tables.select_branches.len(),
+            context.tables.select_branches().len(),
         )?;
         let branches = context
             .tables
-            .select_branches
+            .select_branches()
             .get(positions)
             .ok_or(RenderError::InvalidCatalog)?;
         let mut other = None;
         for branch in branches {
             let name = Self::text(
-                context.tables.text_pool,
+                context.tables.text_pool(),
                 branch.value_offset,
                 branch.value_length,
             )?;
@@ -654,7 +665,7 @@ impl Renderer {
             usize::try_from(plural.rule_set_index).map_err(|_| RenderError::InvalidCatalog)?;
         let rule_set = context
             .tables
-            .rule_sets
+            .rule_sets()
             .get(index)
             .ok_or(RenderError::InvalidCatalog)?;
         if rule_set.kind != plural.kind {
@@ -673,11 +684,11 @@ impl Renderer {
                 start: plural.branch_start,
                 end: plural.branch_end,
             },
-            context.tables.branches.len(),
+            context.tables.branches().len(),
         )?;
         let branches = context
             .tables
-            .branches
+            .branches()
             .get(positions)
             .ok_or(RenderError::InvalidCatalog)?;
         let mut found = None;
@@ -702,11 +713,11 @@ impl Renderer {
                 start: plural.branch_start,
                 end: plural.branch_end,
             },
-            context.tables.branches.len(),
+            context.tables.branches().len(),
         )?;
         let branches = context
             .tables
-            .branches
+            .branches()
             .get(positions)
             .ok_or(RenderError::InvalidCatalog)?;
         Ok(branches
