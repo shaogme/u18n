@@ -31,10 +31,10 @@ Add the runtime and build-time compiler to your application:
 
 ```toml
 [dependencies]
-u18n = "0.3.1"
+u18n = "0.4.0"
 
 [build-dependencies]
-u18n-compiler = "0.3.1"
+u18n-compiler = "0.4.0"
 ```
 
 Create `schema.u18n`:
@@ -96,10 +96,10 @@ include!(concat!(env!("OUT_DIR"), "/u18n_messages.rs"));
 
 fn main() -> Result<(), u18n::RenderError> {
     let locale = &catalogs::locale_en::LOCALE;
-    println!("{}", m_greeting!(locale, "Ada")?);
+    println!("{}", m_greeting! { locale: locale, args: { name: "Ada" } }?);
     println!(
         "{}",
-        t!("cart.items", locale = locale, { count: PluralCount::new(2) })?
+        t! { name: "cart.items", locale: locale, args: { count: PluralCount::new(2) } }?
     );
     Ok(())
 }

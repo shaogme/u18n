@@ -1,12 +1,13 @@
 mod pattern;
 
+pub use pattern::LocaleParseError;
+
 use alloc::{
     format,
     string::{String, ToString},
     vec,
     vec::Vec,
 };
-pub use pattern::LocaleParseError;
 use pattern::{PatternDepth, PatternParser};
 use u18n_ast::{FileId, Identifier, LocaleAst, LocaleId, LocalizedMessage, MessageKey, Span};
 use u18n_locale_tag::ParsedTag;

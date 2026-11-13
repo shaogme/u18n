@@ -29,8 +29,8 @@ Whitespace and `//` line comments may appear between tokens, including before th
 declarations. A comment starts at `//` and ends before the line break. A `///` line immediately
 preceding a message declaration or parameter is retained as translator documentation; consecutive
 documentation comments are kept in source order. Other comments remain trivia. Strings are not part
-of schema version 1. Declarations end with semicolons. Parameter order is significant for generated
-positional macro calls; message declaration order is not semantically significant.
+of schema version 1. Declarations end with semicolons. Parameter order defines the generated runtime
+argument slots; message declaration order is not semantically significant.
 
 ## Lexical rules
 
@@ -150,8 +150,8 @@ Parsing establishes syntax; schema validation establishes these semantic propert
    and label the first key span.
 3. A parameter name occurs at most once within a message. Duplicate diagnostics point to the
    repeated identifier and label the original declaration.
-4. The parameter order in the AST is retained. Locale files bind by name, so locale pattern order
-   never changes generated positional macro argument order.
+4. The parameter order in the AST is retained. Locale files and macro `args` objects bind by name,
+   so their field order never changes the schema-ordered runtime argument slots.
 5. A schema with no message declarations is valid as syntax but is rejected by the compiler as an
    empty catalog input.
 6. Each schema message generates one exported macro named by prefixing `m_` to the deterministic,
@@ -161,28 +161,27 @@ Parsing establishes syntax; schema validation establishes these semantic propert
    makes the complete macro name a legal Rust identifier even when the encoded key alone is a Rust
    keyword. Distinct source keys cannot collide under this encoding; a generated-symbol collision is
    a code-generation error.
-7. A generated macro accepts either positional expressions in schema declaration order or a
-   struct-like named form in braces. Named fields use the source parameter spelling and allow
-   shorthand `{name}` or explicit `{name: expression}`; fields can appear in any order and may have
-   a trailing comma. The shorthand requires a parameter name that can also be used as a Rust
-   expression; `_`, `self`, `Self`, `super`, and `crate` require an explicit expression. Positional
-   calls accept Rust expressions, including brace-delimited block expressions, require exactly the
-   schema arity, and may have a trailing comma. Named calls require every
-   declared parameter and reject unknown or duplicate fields. The two forms cannot be mixed. A
-   zero-parameter message accepts a `LocaleProvider` value alone or an empty named form `{}`.
-   Every value is statically checked against its schema type, including `number` values implementing
-   `core::fmt::Display`; parameterized macros return `Result<String, RenderError>`, while
-   zero-parameter macros return `Result<&'static str, RenderError>`.
+7. A generated `m_*` macro requires a `locale: expression` field. Its optional `formatter`, `sink`,
+   and `args` fields may appear in any order. Message parameters are supplied only in the nested
+   named object `args: { ... }`; fields use the source parameter spelling, allow shorthand
+   `{name}` or explicit `{name: expression}`, and may appear in any order with a trailing comma.
+   The shorthand requires a parameter name that can also be used as a Rust expression; `_`, `self`,
+   `Self`, `super`, and `crate` require an explicit value. Expressions may use normal Rust syntax,
+   including calls, macros, closures, `?`, and blocks. A parameterized message requires every
+   declared field and rejects unknown or duplicate fields. A zero-parameter message may omit `args`
+   or use `args: {}`. Every value is statically checked against its schema type, including `number`
+   values implementing `core::fmt::Display`; parameterized macros return
+   `Result<String, RenderError>`, while zero-parameter macros return `Result<&'static str,
+   RenderError>`.
 8. If any compiled locale's resolved pattern uses a formatting operation for a message, its macro
-   takes a locale provider, then a caller-provided formatter, then either argument form. Other
-   messages accept only the provider and arguments. Each generated macro refers directly to
-   that key's message shard and does not pass a global numeric message ID to the runtime. The
-   expansion evaluates the locale once, then the formatter when required, then argument expressions
-   once in their written order. Named values are reordered only after evaluation to construct the
-   schema-ordered runtime argument slice. Wrong
-   positional arity, mixed forms, and missing, unknown, or duplicate named fields are diagnosed
-   during macro expansion at the relevant call-site token where possible. Rust reports type errors
-   for values that do not match the generated typed argument variants.
+   accepts the `formatter` field for text-returning calls. Other messages reject that field. Each
+   generated macro refers directly to that key's message shard and does not pass a global numeric
+   message ID to the runtime. The expansion evaluates locale, formatter, and sink expressions once
+   in that fixed order, then evaluates argument expressions once in their written order. Named
+   values are reordered only after evaluation to construct the schema-ordered runtime argument
+   slice. Missing, unknown, or duplicate fields are diagnosed during macro expansion at the
+   relevant call-site token where possible. Rust reports type errors for values that do not match
+   the generated typed argument variants.
 
 The schema does not require every parameter to be referenced by every locale. This permits a
 translation to omit a value when its wording does not need it. Referenced parameters are always

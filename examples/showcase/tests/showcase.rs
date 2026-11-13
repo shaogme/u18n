@@ -1,5 +1,5 @@
 use core::{
-    fmt::{Error as FmtError, Result as FmtResult, Write},
+    fmt::{Display, Error as FmtError, Formatter as FmtFormatter, Result as FmtResult, Write},
     ptr,
     str::FromStr,
 };
@@ -20,6 +20,8 @@ use u18n_showcase::{
 struct ExampleFormatter;
 
 struct FailingFormatter;
+
+struct FailingDisplay;
 
 struct RequestLocale {
     locale: &'static Locale,
@@ -50,6 +52,12 @@ static FOREIGN_CATALOG: Catalog = Catalog::new_trusted(CatalogData {
 impl LocaleProvider for RequestLocale {
     fn provide_locale(&self) -> &Locale {
         self.locale
+    }
+}
+
+impl Display for FailingDisplay {
+    fn fmt(&self, _formatter: &mut FmtFormatter<'_>) -> FmtResult {
+        Err(FmtError)
     }
 }
 
@@ -142,11 +150,14 @@ fn key_based_translation_uses_atomic_selection_and_explicit_overrides() {
     let spanish_tag = LocaleTag::from_str("es-419").expect("known locale tag");
     set_current_locale(spanish_tag);
     assert_eq!(t!(r#"app.title"#), "Carrito pequeño");
-    assert_eq!(t!("app.title", locale = english), "Tiny Cart");
+    assert_eq!(t! { name: "app.title", locale: english }, "Tiny Cart");
     let value = PluralDecimal::new(150, 2).expect("valid plural decimal");
-    assert_eq!(t!("cart.decimal_count", value), String::from("1.50 items"));
     assert_eq!(
-        t!("cart.decimal_count", { value: value, }),
+        t! { name: "cart.decimal_count", args: {value: value} },
+        String::from("1.50 items")
+    );
+    assert_eq!(
+        t! { name: "cart.decimal_count", args: { value: value, } },
         String::from("1.50 items")
     );
 
@@ -154,11 +165,11 @@ fn key_based_translation_uses_atomic_selection_and_explicit_overrides() {
     let amount = Decimal::new(1995, 2);
     let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
     assert_eq!(
-        t!("cart.typed_total", formatter = &formatter, { amount, charge }),
+        t! { name: "cart.typed_total", formatter: &formatter, args: { amount, charge } },
         "Total: decimal:1995:2@es-419; charge: money:1234:2:USD@es-419"
     );
     assert_eq!(
-        t!("cart.typed_total", locale = english, formatter = &formatter, { amount, charge }),
+        t! { name: "cart.typed_total", locale: english, formatter: &formatter, args: { amount, charge } },
         "Total: decimal:1995:2@en; charge: money:1234:2:USD@en"
     );
 
@@ -176,41 +187,39 @@ fn keyed_macros_accept_generated_and_application_locale_providers() {
     let count = PluralCount::new(2);
 
     assert_eq!(
-        m_app_stitle!(spanish_tag),
+        m_app_stitle! { locale: spanish_tag },
         Ok(Cow::Borrowed("Carrito pequeño"))
     );
-    assert_eq!(t!("app.title", locale = spanish_tag), "Carrito pequeño");
     assert_eq!(
-        m_app_stitle!(&request_locale),
+        t! { name: "app.title", locale: spanish_tag },
+        "Carrito pequeño"
+    );
+    assert_eq!(
+        m_app_stitle! { locale: &request_locale },
         Ok(Cow::Borrowed("Carrito pequeño"))
     );
-    assert_eq!(t!("app.title", locale = &request_locale), "Carrito pequeño");
+    assert_eq!(
+        t! { name: "app.title", locale: &request_locale },
+        "Carrito pequeño"
+    );
 
     let expected_items = String::from("Ada tiene 2 artículos en el carrito. Gracias, señora.");
     assert_eq!(
-        m_cart_sitems!(spanish_tag, count, "Ada", "female"),
+        m_cart_sitems! { locale: spanish_tag, args: {count: count, owner: "Ada", gender: "female"} },
         Ok(Cow::Owned(expected_items.clone()))
     );
     assert_eq!(
-        t!(
-            "cart.items",
-            locale = spanish_tag,
-            { count, owner: "Ada", gender: "female" }
-        ),
+        t! { name: "cart.items", locale: spanish_tag, args: { count, owner: "Ada", gender: "female" } },
         Cow::<str>::Owned(expected_items.clone())
     );
     assert_eq!(
-        m_cart_sitems!(&request_locale, count, "Ada", "female"),
+        m_cart_sitems! { locale: &request_locale, args: {count: count, owner: "Ada", gender: "female"} },
         Ok(Cow::Owned(String::from(
             "Ada tiene 2 artículos en el carrito. Gracias, señora.",
         )))
     );
     assert_eq!(
-        t!(
-            "cart.items",
-            locale = &request_locale,
-            { count, owner: "Ada", gender: "female" }
-        ),
+        t! { name: "cart.items", locale: &request_locale, args: { count, owner: "Ada", gender: "female" } },
         Cow::<str>::Owned(String::from(
             "Ada tiene 2 artículos en el carrito. Gracias, señora.",
         ))
@@ -238,15 +247,15 @@ fn multiline_patterns_keep_literal_breaks_and_ignore_selector_layout_breaks() {
     let french = &catalogs::locale_fr::LOCALE;
 
     assert_eq!(
-        m_app_smultiline!(english, PluralCount::new(2)),
+        m_app_smultiline! { locale: english, args: {count: PluralCount::new(2)} },
         Ok(Cow::Owned(String::from("Cart:\n2 items\n    in the cart")))
     );
     assert_eq!(
-        m_app_smultiline!(english, PluralCount::new(1)),
+        m_app_smultiline! { locale: english, args: {count: PluralCount::new(1)} },
         Ok(Cow::Owned(String::from("Cart:\n1 item\n    in the cart")))
     );
     assert_eq!(
-        m_app_smultiline!(french, PluralCount::new(2)),
+        m_app_smultiline! { locale: french, args: {count: PluralCount::new(2)} },
         Ok(Cow::Owned(String::from(
             "Panier :\n2 articles\n    dans le panier"
         )))
@@ -258,17 +267,13 @@ fn key_dispatch_evaluates_headers_and_named_values_once_in_written_order() {
     let trace = RefCell::new(Vec::new());
     let formatter = ExampleFormatter;
     let english = &catalogs::locale_en::LOCALE;
-    let rendered = t!(
-        "cart.typed_total",
-        locale = {
-            trace.borrow_mut().push("locale");
-            english
+    let mut output = String::from("prefix: ");
+    let rendered = t! {
+        sink: {
+            trace.borrow_mut().push("sink");
+            &mut output
         },
-        formatter = {
-            trace.borrow_mut().push("formatter");
-            &formatter
-        },
-        {
+        args: {
             charge: {
                 trace.borrow_mut().push("charge");
                 Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code")
@@ -277,16 +282,26 @@ fn key_dispatch_evaluates_headers_and_named_values_once_in_written_order() {
                 trace.borrow_mut().push("amount");
                 Decimal::new(1995, 2)
             },
-        }
-    );
+        },
+        formatter: {
+            trace.borrow_mut().push("formatter");
+            &formatter
+        },
+        locale: {
+            trace.borrow_mut().push("locale");
+            english
+        },
+        name: "cart.typed_total",
+    };
 
+    assert_eq!(rendered, Ok(()));
     assert_eq!(
-        rendered,
-        "Total: decimal:1995:2@en; charge: money:1234:2:USD@en"
+        output,
+        "prefix: Total: decimal:1995:2@en; charge: money:1234:2:USD@en"
     );
     assert_eq!(
         &*trace.borrow(),
-        &["locale", "formatter", "charge", "amount"]
+        &["locale", "formatter", "sink", "charge", "amount"]
     );
 }
 
@@ -299,58 +314,156 @@ fn translation_fallback_handles_render_errors_without_changing_message_macros() 
     let failing_formatter = FailingFormatter;
 
     assert_eq!(
-        m_app_stitle!(&mismatched_locale),
+        m_app_stitle! { locale: &mismatched_locale },
         Err(RenderError::LocaleMismatch)
     );
     assert_eq!(
-        t!("app.title", locale = &mismatched_locale),
+        t! { name: "app.title", locale: &mismatched_locale },
         "Unable to render message"
     );
     assert_eq!(
-        m_cart_styped_utotal!(english, &failing_formatter, { amount, charge }),
+        m_cart_styped_utotal! { locale: english, formatter: &failing_formatter, args: { amount, charge } },
         Err(RenderError::FormatterFailed)
     );
     assert_eq!(
-        t!("cart.typed_total", formatter = &failing_formatter, { amount, charge }),
+        t! { name: "cart.typed_total", formatter: &failing_formatter, args: { amount, charge } },
         "Unable to render message"
     );
     assert_eq!(
-        t!("cart.typed_total", { amount, charge }),
+        t! { name: "cart.typed_total", args: { amount, charge } },
         "Unable to render message"
     );
+
+    let mut output = String::from("prefix: ");
+    assert_eq!(
+        t! { name: "cart.typed_total", locale: english, formatter: &failing_formatter, sink: &mut output, args: { amount, charge } },
+        Err(RenderError::FormatterFailed)
+    );
+    assert_eq!(output, "prefix: Total: ");
+
+    let mut output = String::from("prefix: ");
+    assert_eq!(
+        t! { name: "cart.typed_total", locale: english, sink: &mut output, args: { amount, charge } },
+        Err(RenderError::FormatterRequired)
+    );
+    assert_eq!(output, "prefix: Total: ");
+
+    let mut output = String::from("prefix: ");
+    assert_eq!(
+        t! { name: "app.title", locale: &mismatched_locale, sink: &mut output },
+        Err(RenderError::LocaleMismatch)
+    );
+    assert_eq!(output, "prefix: ");
+}
+
+#[test]
+fn keyed_sink_calls_append_and_propagate_runtime_errors() {
+    struct CollectWrites {
+        output: String,
+    }
+
+    impl Write for CollectWrites {
+        fn write_str(&mut self, value: &str) -> FmtResult {
+            self.output.push_str(value);
+            Ok(())
+        }
+    }
+
+    struct RejectWrites;
+
+    impl Write for RejectWrites {
+        fn write_str(&mut self, _value: &str) -> FmtResult {
+            Err(FmtError)
+        }
+    }
+
+    let english = &catalogs::locale_en::LOCALE;
+    let mut output = String::from("prefix: ");
+    assert_eq!(m_app_stitle! { locale: english, sink: &mut output }, Ok(()));
+    assert_eq!(output, "prefix: Tiny Cart");
+
+    let mut custom_writer = CollectWrites {
+        output: String::from("custom: "),
+    };
+    assert_eq!(
+        m_app_stitle! { locale: english, sink: &mut custom_writer },
+        Ok(())
+    );
+    assert_eq!(custom_writer.output, "custom: Tiny Cart");
+
+    let mut output = String::from("prefix: ");
+    assert_eq!(
+        m_cart_sitems! { locale: english, sink: &mut output, args: {count: PluralCount::new(2), owner: "Ada", gender: "female"} },
+        Ok(())
+    );
+    assert_eq!(
+        output,
+        "prefix: Ada has 2 items in the cart. She has it covered."
+    );
+
+    let amount = Decimal::new(1995, 2);
+    let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
+    let mut output = String::from("prefix: ");
+    assert_eq!(
+        m_cart_styped_utotal! { locale: english, formatter: &ExampleFormatter, sink: &mut output, args: { amount, charge } },
+        Ok(())
+    );
+    assert_eq!(
+        output,
+        "prefix: Total: decimal:1995:2@en; charge: money:1234:2:USD@en"
+    );
+
+    let mut output = String::from("prefix: ");
+    assert_eq!(
+        m_cart_styped_utotal! { locale: english, sink: &mut output, args: { amount, charge } },
+        Err(RenderError::FormatterRequired)
+    );
+    assert_eq!(output, "prefix: Total: ");
+
+    assert_eq!(
+        m_app_stitle! { locale: english, sink: &mut RejectWrites },
+        Err(RenderError::WriteFailed)
+    );
+
+    let mut output = String::from("prefix: ");
+    assert_eq!(
+        m_report_svalues! { locale: english, sink: &mut output, args: {first: FailingDisplay, second: 4.5} },
+        Err(RenderError::FormattingFailed)
+    );
+    assert_eq!(output, "prefix: ");
 }
 
 #[test]
 fn cow_macro_output_preserves_borrowed_static_and_fallback_text() {
     let english = &catalogs::locale_en::LOCALE;
-    let static_text = m_app_stitle!(english).expect("static title renders");
+    let static_text = m_app_stitle! { locale: english }.expect("static title renders");
     assert!(matches!(static_text, Cow::Borrowed("Tiny Cart")));
 
-    let rendered = m_cart_sitems!(english, PluralCount::new(2), "Ada", "female")
+    let rendered = m_cart_sitems!{ locale: english, args: {count: PluralCount::new(2), owner: "Ada", gender: "female"} }
         .expect("parameterized message renders");
     assert!(matches!(rendered, Cow::Owned(_)));
 
     let amount = Decimal::new(1995, 2);
     let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
     let formatter = ExampleFormatter;
-    let formatted = m_cart_styped_utotal!(english, &formatter, amount, charge)
-        .expect("formatted message renders");
+    let formatted = m_cart_styped_utotal! {
+        args: { charge, amount },
+        formatter: &formatter,
+        locale: english,
+    }
+    .expect("formatted message renders");
     assert!(matches!(formatted, Cow::Owned(_)));
-    let formatted_translation = t!(
-        "cart.typed_total",
-        locale = english,
-        formatter = &formatter,
-        { amount, charge }
-    );
+    let formatted_translation = t! { name: "cart.typed_total", locale: english, formatter: &formatter, args: { amount, charge } };
     assert!(matches!(formatted_translation, Cow::Owned(_)));
 
     let mismatched_locale = Locale::new_trusted(english.index(), "wrong-tag");
-    let fallback = t!("app.title", locale = &mismatched_locale);
+    let fallback = t! { name: "app.title", locale: &mismatched_locale };
     assert!(matches!(
         fallback,
         Cow::Borrowed("Unable to render message")
     ));
-    let parameterized_fallback = t!("cart.typed_total", locale = english, { amount, charge });
+    let parameterized_fallback =
+        t! { name: "cart.typed_total", locale: english, args: { amount, charge } };
     assert!(matches!(
         parameterized_fallback,
         Cow::Borrowed("Unable to render message")
@@ -361,13 +474,13 @@ fn cow_macro_output_preserves_borrowed_static_and_fallback_text() {
 fn renders_decimal_cardinal_values_with_their_visible_scale() {
     let value = PluralDecimal::new(150, 2).expect("valid plural decimal");
     assert_eq!(
-        m_cart_sdecimal_ucount!(&catalogs::locale_es_419::LOCALE, value,),
+        m_cart_sdecimal_ucount! { locale: &catalogs::locale_es_419::LOCALE, args: {value: value} },
         Ok(Cow::Owned(String::from("1.50 items")))
     );
 
     let exact = PluralDecimal::new(200, 2).expect("valid plural decimal");
     assert_eq!(
-        m_cart_sdecimal_ucount!(&catalogs::locale_en::LOCALE, exact),
+        m_cart_sdecimal_ucount! { locale: &catalogs::locale_en::LOCALE, args: {value: exact} },
         Ok(Cow::Owned(String::from("exact 2.00")))
     );
 }
@@ -390,7 +503,7 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
         (1, "Ada has 1 item in the cart. They have it covered."),
         (0, "Ada has no items in the cart. They have it covered."),
     ] {
-        let keyed = m_cart_sitems!(english_locale, PluralCount::new(count), "Ada", "other");
+        let keyed = m_cart_sitems! { locale: english_locale, args: {count: PluralCount::new(count), owner: "Ada", gender: "other"} };
         let dynamic = english_catalog.render(
             3,
             &[
@@ -431,7 +544,7 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
         },
     ] {
         let value = PluralDecimal::new(case.coefficient, case.scale).expect("valid plural decimal");
-        let keyed = m_cart_sdecimal_ucount!(english_locale, value);
+        let keyed = m_cart_sdecimal_ucount! { locale: english_locale, args: {value: value} };
         let dynamic = english_catalog.render(2, &[ArgumentValue::PluralDecimal(value)]);
         assert_eq!(keyed.as_deref(), dynamic.as_deref());
         assert_eq!(dynamic.as_deref(), Ok(case.expected));
@@ -449,7 +562,8 @@ fn repeated_plural_selection_matches_keyed_and_dynamic_rendering() {
         (22, "22nd"),
         (1, "1st"),
     ] {
-        let keyed = m_rank_sposition!(english_locale, OrdinalCount::new(rank));
+        let keyed =
+            m_rank_sposition! { locale: english_locale, args: {rank: OrdinalCount::new(rank)} };
         let dynamic =
             english_catalog.render(8, &[ArgumentValue::OrdinalCount(OrdinalCount::new(rank))]);
         assert_eq!(keyed.as_deref(), dynamic.as_deref());
@@ -523,30 +637,29 @@ fn renders_schema_typed_messages_for_each_locale() {
     let english = &catalogs::locale_en::LOCALE;
 
     assert_eq!(
-        m_app_stitle!(english, {}).expect("title renders"),
+        m_app_stitle! { locale: english, args: {} }.expect("title renders"),
         "Tiny Cart"
     );
     assert_eq!(
-        m_cart_sitems!(english, PluralCount::new(1), "Ada", "female").expect("one item renders"),
+        m_cart_sitems!{ locale: english, args: {count: PluralCount::new(1), owner: "Ada", gender: "female"} }
+            .expect("one item renders"),
         "Ada has 1 item in the cart. She has it covered."
     );
     assert_eq!(
-        m_cart_sitems!(english, PluralCount::new(3), "Ada", "male").expect("many items render"),
+        m_cart_sitems!{ locale: english, args: {count: PluralCount::new(3), owner: "Ada", gender: "male"} }
+            .expect("many items render"),
         "Ada has 3 items in the cart. He has it covered."
     );
     assert_eq!(
-        m_cart_stotal!(english, 19.95, "USD").expect("total renders"),
+        m_cart_stotal! { locale: english, args: {amount: 19.95, currency: "USD"} }
+            .expect("total renders"),
         "Total: 19.95 USD"
     );
     assert_eq!(
-        m_cart_stotal!(
-            english,
-            {
-                let amount = 20.0;
-                amount - 0.05
-            },
-            "USD"
-        )
+        m_cart_stotal! { locale: english, args: {amount: {
+            let amount = 20.0;
+            amount - 0.05
+        }, currency: "USD"} }
         .expect("a block expression renders as a positional argument"),
         "Total: 19.95 USD"
     );
@@ -561,21 +674,23 @@ fn renders_exact_plural_select_and_fallback_branches() {
     let gender = "female";
 
     assert_eq!(
-        m_cart_sitems!(english, { gender: "other", owner: "Ada", count: PluralCount::new(0), })
+        m_cart_sitems!{ locale: english, args: { gender: "other", owner: "Ada", count: PluralCount::new(0), } }
             .expect("exact zero branch renders"),
         "Ada has no items in the cart. They have it covered."
     );
     assert_eq!(
-        m_cart_sitems!(spanish, { gender, owner, count }).expect("Spanish selectors render"),
+        m_cart_sitems! { locale: spanish, args: { gender, owner, count } }
+            .expect("Spanish selectors render"),
         "Ada tiene 2 artículos en el carrito. Gracias, señora."
     );
     assert_eq!(
-        m_cart_sitems!(spanish, PluralCount::new(0), "Ada", "unknown")
+        m_cart_sitems!{ locale: spanish, args: {count: PluralCount::new(0), owner: "Ada", gender: "unknown"} }
             .expect("Spanish other cases render"),
         "Ada no tiene ningún artículo en el carrito. Gracias."
     );
     assert_eq!(
-        m_cart_stotal!(spanish, 19.95, "USD").expect("fallback total renders"),
+        m_cart_stotal! { locale: spanish, args: {amount: 19.95, currency: "USD"} }
+            .expect("fallback total renders"),
         "Total: 19.95 USD"
     );
 }
@@ -590,19 +705,19 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     let french_locale = &catalogs::locale_fr::LOCALE;
 
     assert_eq!(
-        m_app_stitle!(english_locale).as_deref(),
+        m_app_stitle! { locale: english_locale }.as_deref(),
         english.render(1, &[]).as_deref()
     );
-    assert_eq!(m_app_stitle!(french_locale), Ok(Cow::Borrowed("Tiny Cart")));
+    assert_eq!(
+        m_app_stitle! { locale: french_locale },
+        Ok(Cow::Borrowed("Tiny Cart"))
+    );
     assert!(matches!(
         french.render(1, &[]),
         Ok(Cow::Borrowed("Tiny Cart"))
     ));
     assert_eq!(
-        m_cart_sdecimal_ucount!(
-            french_locale,
-            PluralDecimal::new(200, 2).expect("valid plural decimal")
-        )
+        m_cart_sdecimal_ucount!{ locale: french_locale, args: {value: PluralDecimal::new(200, 2).expect("valid plural decimal")} }
         .as_deref(),
         french
             .render(
@@ -614,7 +729,8 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
             .as_deref()
     );
     assert_eq!(
-        m_cart_sitems!(spanish_locale, PluralCount::new(2), "Ada", "female").as_deref(),
+        m_cart_sitems!{ locale: spanish_locale, args: {count: PluralCount::new(2), owner: "Ada", gender: "female"} }
+        .as_deref(),
         spanish
             .render(
                 3,
@@ -628,7 +744,8 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     );
     let amount = 19.95;
     assert_eq!(
-        m_cart_stotal!(spanish_locale, amount, "USD").as_deref(),
+        m_cart_stotal! { locale: spanish_locale, args: {amount: amount, currency: "USD"} }
+            .as_deref(),
         spanish
             .render(
                 4,
@@ -641,7 +758,8 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
     let amount = Decimal::new(1995, 2);
     let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
     assert_eq!(
-        m_cart_styped_utotal!(spanish_locale, &formatter, amount, charge).as_deref(),
+        m_cart_styped_utotal!{ locale: spanish_locale, formatter: &formatter, args: {amount: amount, charge: charge} }
+        .as_deref(),
         spanish
             .render_with(
                 &formatter,
@@ -651,13 +769,7 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
             .as_deref()
     );
     assert_eq!(
-        m_event_swhen!(
-            french_locale,
-            &formatter,
-            CivilDate::new(2026, 7, 4).expect("valid date"),
-            CivilTime::new(9, 30, 0, 0).expect("valid time"),
-            Instant::new(1_783_150_200, 0).expect("valid instant"),
-        )
+        m_event_swhen!{ locale: french_locale, formatter: &formatter, args: {day: CivilDate::new(2026, 7, 4).expect("valid date"), clock: CivilTime::new(9, 30, 0, 0).expect("valid time"), moment: Instant::new(1_783_150_200, 0).expect("valid instant")} }
         .as_deref(),
         french
             .render_with(
@@ -672,7 +784,8 @@ fn keyed_macros_match_dynamic_rendering_for_each_locale_path() {
             .as_deref()
     );
     assert_eq!(
-        m_rank_sposition!(english_locale, OrdinalCount::new(22)).as_deref(),
+        m_rank_sposition! { locale: english_locale, args: {rank: OrdinalCount::new(22)} }
+            .as_deref(),
         english
             .render(8, &[ArgumentValue::OrdinalCount(OrdinalCount::new(22))])
             .as_deref()
@@ -713,31 +826,28 @@ fn delegates_typed_formatting_with_catalog_locale_and_selects_ordinals() {
     let charge = Money::new(Decimal::new(1234, 2), "USD").expect("valid currency code");
 
     assert_eq!(
-        m_cart_styped_utotal!(english, &formatter, amount, charge).expect("typed total renders"),
+        m_cart_styped_utotal!{ locale: english, formatter: &formatter, args: {amount: amount, charge: charge} }
+            .expect("typed total renders"),
         "Total: decimal:1995:2@en; charge: money:1234:2:USD@en"
     );
     assert_eq!(
-        m_cart_styped_utotal!(spanish, &formatter, amount, charge)
+        m_cart_styped_utotal!{ locale: spanish, formatter: &formatter, args: {amount: amount, charge: charge} }
             .expect("fallback formatting uses selected catalog locale"),
         "Total: decimal:1995:2@es-419; charge: money:1234:2:USD@es-419"
     );
     assert_eq!(
-        m_event_swhen!(
-            english,
-            &formatter,
-            CivilDate::new(2026, 7, 4).expect("valid date"),
-            CivilTime::new(9, 30, 0, 0).expect("valid time"),
-            Instant::new(1_783_150_200, 0).expect("valid instant"),
-        )
+        m_event_swhen!{ locale: english, formatter: &formatter, args: {day: CivilDate::new(2026, 7, 4).expect("valid date"), clock: CivilTime::new(9, 30, 0, 0).expect("valid time"), moment: Instant::new(1_783_150_200, 0).expect("valid instant")} }
         .expect("date and time formatters render"),
         "date:2026-07-04@en at time:09:30:00@en; logged instant:1783150200:UTC@en"
     );
     assert_eq!(
-        m_rank_sposition!(english, OrdinalCount::new(22)).expect("ordinal renders"),
+        m_rank_sposition! { locale: english, args: {rank: OrdinalCount::new(22)} }
+            .expect("ordinal renders"),
         "22nd"
     );
     assert_eq!(
-        m_report_svalues!(english, 3, 4.5).expect("multiple display values render"),
+        m_report_svalues! { locale: english, args: {first: 3, second: 4.5} }
+            .expect("multiple display values render"),
         "3/4.5"
     );
 }
@@ -746,16 +856,8 @@ fn delegates_typed_formatting_with_catalog_locale_and_selects_ordinals() {
 fn evaluates_catalog_formatter_and_named_values_once_in_written_order() {
     let trace = RefCell::new(Vec::new());
     let formatter = ExampleFormatter;
-    let rendered = m_event_swhen!(
-        {
-            trace.borrow_mut().push("catalog");
-            &catalogs::locale_en::LOCALE
-        },
-        {
-            trace.borrow_mut().push("formatter");
-            &formatter
-        },
-        {
+    let rendered = m_event_swhen! {
+        args: {
             moment: {
                 trace.borrow_mut().push("moment");
                 Instant::new(1_783_150_200, 0).expect("valid instant")
@@ -768,8 +870,16 @@ fn evaluates_catalog_formatter_and_named_values_once_in_written_order() {
                 trace.borrow_mut().push("day");
                 CivilDate::new(2026, 7, 4).expect("valid date")
             },
-        }
-    )
+        },
+        formatter: {
+            trace.borrow_mut().push("formatter");
+            &formatter
+        },
+        locale: {
+            trace.borrow_mut().push("catalog");
+            &catalogs::locale_en::LOCALE
+        },
+    }
     .expect("formatted message renders");
 
     assert_eq!(

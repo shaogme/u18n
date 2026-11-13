@@ -19,11 +19,11 @@ use u18n::PluralCount;
 use u18n_showcase::{LocaleTag, catalogs, m_cart_sitems, t};
 
 let tag = LocaleTag::from_str("es-419").expect("locale is included");
-let text = t!(
-    "cart.items",
-    locale = tag,
-    { count: PluralCount::new(3), owner: "Ada", gender: "other" }
-);
+let text = t! {
+    args: { count: PluralCount::new(3), owner: "Ada", gender: "other" },
+    locale: tag,
+    name: "cart.items",
+};
 ```
 
 For calls that need the lightweight handle explicitly, use `tag.as_locale()` or
@@ -65,17 +65,15 @@ The option is independent of `--atomic` and `--final-fallback`.
 
 ## Call generated message macros
 
-In the default build configuration, `t!` requires a `locale = expression` header. A per-message
-macro takes a `LocaleProvider` value as its first argument. `Locale`, `&Locale`, generated
-`LocaleTag`, and borrowed application providers are supported:
+`m_*` calls require a `locale: expression` field. In non-atomic builds `t!` also requires that
+field; atomic `t!` calls may omit it to use the current locale. `Locale`, `&Locale`, generated
+`LocaleTag`, and application types implementing `LocaleProvider` are supported:
 
 ```rust
-let text = m_cart_sitems!(
-    tag,
-    PluralCount::new(3),
-    "Ada",
-    "other"
-)?;
+let text = m_cart_sitems! {
+    locale: tag,
+    args: { count: PluralCount::new(3), owner: "Ada", gender: "other" },
+}?;
 ```
 
 Applications can implement `LocaleProvider` for a request or application type:
@@ -93,28 +91,31 @@ impl LocaleProvider for RequestLocale {
 }
 
 let request_locale = RequestLocale(&catalogs::locale_es_419::LOCALE);
-let title = t!("app.title", locale = &request_locale);
-let items = m_cart_sitems!(&request_locale, PluralCount::new(2), "Ada", "female")?;
+let title = t! { name: "app.title", locale: &request_locale };
+let items = m_cart_sitems! {
+    locale: &request_locale,
+    args: { count: PluralCount::new(2), owner: "Ada", gender: "female" },
+}?;
 ```
 
 The provider returns a generated `Locale` handle; keyed rendering checks its index and exact
 source tag against the selected message shard. A shared `&dyn LocaleProvider` is supported by the
 `MessageData` rendering methods.
 
-Schema parameter order controls positional calls. For long signatures, use named fields in any
-order; the names must match the schema, and every declared parameter must be supplied:
+Every message parameter goes in the named `args` object. Field order does not affect the schema
+order used for rendering; all declared parameters must be supplied:
 
 ```rust
-let text = m_checkout_sorder_usummary!(
-    tag,
-    {
+let text = m_checkout_sorder_usummary! {
+    locale: tag,
+    args: {
         currency: "USD",
         total: 24.50,
         quantity: PluralCount::new(2),
         product: "mugs",
         customer: "Ada",
-    }
-)?;
+    },
+}?;
 ```
 
 Named expressions are evaluated once, in the order written, then arranged in schema order for
@@ -141,7 +142,7 @@ let generated = Compiler::new(options).compile(input)?;
 The generated API provides `set_current_locale`, `clear_current_locale`, `current_locale`, and
 `FINAL_FALLBACK_LOCALE` for keyed calls. With atomic selection enabled, `t!("app.title")` uses the
 current locale handle, or the configured final fallback after `clear_current_locale()`. An
-explicit `locale = expression` header overrides the current selection. `current_catalog()` and
+explicit `locale: expression` field overrides the current selection. `current_catalog()` and
 `FINAL_FALLBACK_CATALOG` remain available for dynamic-ID callers. The feature requires
 pointer-width atomics on the target.
 
@@ -260,7 +261,11 @@ let charge = Money::new(Decimal::new(1234, 2), "USD")
     .expect("three-letter uppercase currency code");
 let formatter = AppFormatter; // Implements u18n::Formatter.
 
-let text = m_invoice_stotal!(locale, &formatter, amount, charge)?;
+let text = m_invoice_stotal! {
+    locale: locale,
+    formatter: &formatter,
+    args: { amount, charge },
+}?;
 ```
 
 The formatter receives a `FormatRequest` containing the typed value, closed format options, and
@@ -269,10 +274,13 @@ renderer and can return `FormatterError::Unsupported` for requests it cannot han
 reports formatter errors as `RenderError::FormatterFailed`. `Money::new` checks that a currency
 code has three uppercase ASCII letters. The caller must also supply a code assigned by ISO 4217.
 
-Any message that uses a format operation in at least one compiled locale requires a formatter
-argument, even if the selected locale's resolved pattern does not use formatting. The [showcase
-formatter](../examples/showcase/src/main.rs) demonstrates the trait, and the [Locale AST
-specification](specification/locale-ast.md#grammar) lists all format operations and options.
+Any message that uses a format operation in at least one compiled locale needs a formatter for a
+text-returning call, even if the selected locale's resolved pattern does not use formatting. Add
+`sink: &mut writer` to stream directly; in sink mode the formatter may
+be omitted, in which case runtime returns `FormatterRequired` only if the selected program uses a
+format operation. The [showcase formatter](../examples/showcase/src/main.rs) demonstrates the
+trait, and the [Locale AST specification](specification/locale-ast.md#grammar) lists all format
+operations and options.
 
 ## Stream output through the runtime
 
@@ -280,9 +288,26 @@ Zero-argument generated message macros return `Result<&'static str, RenderError>
 macros return `Result<String, RenderError>`. Dynamic `Catalog::render` returns a
 `RenderedMessage` (`Cow<'static, str>`), borrowed for zero-argument messages and owned for
 parameterized messages. Call `into_owned()` if a dynamic call must always produce a `String`. A
-`MessageData` handle also offers `render_to` and `render_with_to` for keyed rendering into a
-caller-owned `core::fmt::Write` sink. Code that manages numeric message IDs can use the dynamic
-catalog methods:
+generated macro also accepts a `sink: &mut writer` field alongside `locale` and optional `formatter`. It
+appends directly to any `core::fmt::Write` sink and returns `Result<(), RenderError>` without
+constructing an intermediate output string:
+
+```rust
+let mut output = String::from("prefix: ");
+m_cart_sitems! {
+    locale: locale,
+    sink: &mut output,
+    args: { count: PluralCount::new(2), owner: "Ada", gender: "female" },
+}?;
+```
+
+The sink is not cleared. If rendering fails after writing a prefix, that prefix remains. Sink
+errors return `WriteFailed`; `Display` errors return `FormattingFailed`; formatter errors return
+`FormatterFailed`. A sink call to `t!` propagates these errors even when a fixed render-error
+fallback is configured, since appending a fallback after a partial message would mix the outputs.
+A sink can be `String` or any custom `core::fmt::Write`; `std::io::Write` alone does not implement
+this interface. A `MessageData` handle also offers `render_to` and `render_with_to` for keyed
+rendering. Code that manages numeric message IDs can use the dynamic catalog methods:
 
 ```rust
 let mut output = String::new();

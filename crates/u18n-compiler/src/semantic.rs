@@ -3,6 +3,11 @@ mod model;
 mod pattern;
 mod schema;
 
+pub(crate) use model::{
+    LinkedCatalog, LinkedLocale, LinkedPattern, LinkedPatternPart, LinkedPluralBranch,
+    LinkedSelectBranch, LocaleInput, LocaleParseStatus,
+};
+
 use std::{collections::BTreeMap, convert::TryFrom};
 use u18n_locale_tag::ParsedTag;
 
@@ -16,11 +21,6 @@ use crate::{
         model::LocaleWork,
         schema::SchemaLinker,
     },
-};
-
-pub(crate) use model::{
-    LinkedCatalog, LinkedLocale, LinkedPattern, LinkedPatternPart, LinkedPluralBranch,
-    LinkedSelectBranch, LocaleInput, LocaleParseStatus,
 };
 
 pub(crate) struct ValidationRequest<'a> {

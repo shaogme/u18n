@@ -63,10 +63,6 @@ impl SourceEmitter {
             input.formatted_keys,
             MessageEmissionOptions {
                 atomic_locale: input.generation.atomic_locale,
-                render_error_fallback_enabled: input
-                    .generation
-                    .render_error_fallback_message
-                    .is_some(),
                 cow_macro_output: input.generation.cow_macro_output,
             },
         )?;

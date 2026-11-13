@@ -3,7 +3,6 @@ name = "u18n-showcase"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "A demonstration package for the u18n compile-time localization workflow."

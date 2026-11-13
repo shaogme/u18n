@@ -3,7 +3,6 @@ name = "u18n-result-api-example"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "An example of handling t! render errors as Results."

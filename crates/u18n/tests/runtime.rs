@@ -2647,7 +2647,7 @@ fn checked_catalogs_validate_syntax_without_requiring_registry_membership() {
 
 static FALLBACK_CYCLE_A: Catalog = Catalog::new_trusted(CatalogData {
     locale_tag: "ca",
-    fallback: Some(&FALLBACK_CYCLE_B),
+    fallback: Some(fallback_cycle_b()),
     bindings: &NO_FALLBACK_BINDINGS,
     shared_store: &EMPTY_SHARED_STORE,
 });
@@ -2657,6 +2657,11 @@ static FALLBACK_CYCLE_B: Catalog = Catalog::new_trusted(CatalogData {
     bindings: &NO_FALLBACK_BINDINGS,
     shared_store: &EMPTY_SHARED_STORE,
 });
+
+const fn fallback_cycle_b() -> &'static Catalog {
+    &FALLBACK_CYCLE_B
+}
+
 static UNSORTED_BINDINGS: [MessageBinding; 2] = [
     MessageBinding {
         message_id: 1,

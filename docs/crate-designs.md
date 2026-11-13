@@ -139,16 +139,20 @@ format version, locale-data identifiers, pool limit, locale-selection settings, 
 [`crates/u18n-macros/src/lib.rs`](../crates/u18n-macros/src/lib.rs) is a host-side proc-macro
 helper, not the owner of message definitions. The compiler emits `macro_rules!` definitions for
 each schema message; those definitions call the hidden `invoke_message` helper with the message
-schema, formatter requirement, lightweight locale expression, that key's shard, and caller
-arguments.
+schema and shard, plus either the direct call's fields or the normalized fields from `t!` dispatch.
 
-`invoke_message` parses positional or named arguments, diagnoses invalid arity and named fields,
-and emits typed `ArgumentValue` constructors for parameterized messages. Zero-argument calls go
-directly to the selected shard's static-text accessor without constructing an argument array. For
-named arguments, it evaluates expressions once in written order and only then arranges values into
-schema order. `dispatch_translation` expands
-`t!("key", ...)`: it validates the control-header form, selects an explicit locale or the
-generated atomic current locale, and forwards the call to the key-specific generated macro.
+`invoke_message` parses the `locale`, optional `formatter` and `sink`, and named `args` fields,
+diagnoses invalid and incomplete fields, and emits typed `ArgumentValue` constructors for
+parameterized messages. Without a sink it preserves the text-returning methods and their output
+types. With a sink it selects `render_to` or `render_with_to`, including for zero-argument
+messages. It evaluates control expressions once in the fixed order locale, formatter, sink,
+evaluates argument expressions once in their written order, and then arranges values into schema
+order. `dispatch_translation` parses structured `t!` fields, reads and validates the `name` string
+literal, selects an explicit locale or the generated atomic current locale, and forwards the
+remaining fields to the key-specific generated macro. The short `t!("key")` form remains available
+for zero-parameter messages. Generated code exposes a doc-hidden runtime re-export and routes
+helper and argument-type paths through `$crate`, so downstream users can rename the catalog
+dependency without adding the runtime crate as a direct dependency.
 
 The message-key encoding is implemented in both the compiler and this crate. The compiler emits
 the macro name, while the dispatcher reconstructs it from a literal key; both use the same

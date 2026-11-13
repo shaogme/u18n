@@ -13,9 +13,17 @@ struct MessagePlan<'a> {
     cow_macro_output: bool,
 }
 
+struct InvocationEmission<'a> {
+    mode: &'a str,
+    allow_missing_formatter: &'a str,
+    locale: &'a str,
+    formatter: &'a str,
+    sink: &'a str,
+    arguments: &'a str,
+}
+
 pub(super) struct MessageEmissionOptions {
     pub(super) atomic_locale: bool,
-    pub(super) render_error_fallback_enabled: bool,
     pub(super) cow_macro_output: bool,
 }
 
@@ -44,8 +52,13 @@ impl MessageEmitter {
             "use u18n::{{__private::ParsedTag, Catalog, Locale, LocaleProvider}};\n"
         )
         .map_err(|_| "could not format generated source".to_string())?;
+        writeln!(
+            output,
+            "#[doc(hidden)] pub mod __u18n_runtime {{ pub use u18n::{{__dispatch_translation, __invoke_message, ArgumentValue}}; }}\n"
+        )
+        .map_err(|_| "could not format generated source".to_string())?;
         for plan in &plans {
-            Self::emit_macro(output, plan, options.render_error_fallback_enabled)
+            Self::emit_macro(output, plan)
                 .map_err(|_| "could not format generated source".to_string())?;
         }
         Ok(())
@@ -64,10 +77,16 @@ impl MessageEmitter {
         )?;
         writeln!(output, "#[macro_export]")?;
         writeln!(output, "macro_rules! t {{")?;
-        writeln!(output, "    ($key:literal $(, $($arguments:tt)*)?) => {{")?;
+        writeln!(output, "    ($key:literal) => {{")?;
         writeln!(
             output,
-            "        ::u18n::__dispatch_translation!($key, {atomic_locale}, [$crate]{fallback}; $($($arguments)*)?)"
+            "        $crate::__u18n_runtime::__dispatch_translation! {{ {atomic_locale}, [$crate]{fallback}; name: $key }}"
+        )?;
+        writeln!(output, "    }};")?;
+        writeln!(output, "    ($($fields:tt)*) => {{")?;
+        writeln!(
+            output,
+            "        $crate::__u18n_runtime::__dispatch_translation! {{ {atomic_locale}, [$crate]{fallback}; $($fields)* }}"
         )?;
         writeln!(output, "    }};")?;
         writeln!(output, "}}")?;
@@ -100,11 +119,7 @@ impl MessageEmitter {
         Ok(plans)
     }
 
-    fn emit_macro(
-        output: &mut String,
-        plan: &MessagePlan<'_>,
-        render_error_fallback_enabled: bool,
-    ) -> Result<(), FmtError> {
+    fn emit_macro(output: &mut String, plan: &MessagePlan<'_>) -> Result<(), FmtError> {
         writeln!(
             output,
             "/// Renders the `{}` message with its schema-checked arguments.",
@@ -112,44 +127,36 @@ impl MessageEmitter {
         )?;
         writeln!(output, "#[macro_export]")?;
         writeln!(output, "macro_rules! {} {{", plan.macro_name)?;
-        if plan.needs_formatter {
-            writeln!(
-                output,
-                "    (@__u18n_dispatch [$locale:expr] [$formatter:expr] {{$($arguments:tt)*}}) => {{"
-            )?;
-            Self::emit_invocation(output, plan, "$locale", "$formatter", "$($arguments)*")?;
-            writeln!(output, "    }};")?;
-            if render_error_fallback_enabled {
-                writeln!(
-                    output,
-                    "    (@__u18n_dispatch [$locale:expr] [] {{$($arguments:tt)*}}) => {{"
-                )?;
-                Self::emit_invocation(output, plan, "$locale", "", "$($arguments)*")?;
-                writeln!(output, "    }};")?;
-            }
-        } else {
-            writeln!(
-                output,
-                "    (@__u18n_dispatch [$locale:expr] [] {{$($arguments:tt)*}}) => {{"
-            )?;
-            Self::emit_invocation(output, plan, "$locale", "", "$($arguments)*")?;
-            writeln!(output, "    }};")?;
-        }
-        if plan.needs_formatter {
-            writeln!(
-                output,
-                "    ($locale:expr, $formatter:expr $(, $($arguments:tt)*)?) => {{"
-            )?;
-        } else {
-            writeln!(output, "    ($locale:expr $(, $($arguments:tt)*)?) => {{")?;
-        }
-
-        let formatter = if plan.needs_formatter {
-            "$formatter"
-        } else {
-            ""
-        };
-        Self::emit_invocation(output, plan, "$locale", formatter, "$($($arguments)*)?")?;
+        writeln!(
+            output,
+            "    (@__u18n_dispatch [$allow_missing:literal] [$locale:expr] [$($formatter:tt)*] [$($sink:tt)*] {{$($arguments:tt)*}}) => {{"
+        )?;
+        Self::emit_invocation(
+            output,
+            plan,
+            InvocationEmission {
+                mode: "dispatch",
+                allow_missing_formatter: "$allow_missing",
+                locale: "$locale",
+                formatter: "$($formatter)*",
+                sink: "$($sink)*",
+                arguments: "$($arguments)*",
+            },
+        )?;
+        writeln!(output, "    }};")?;
+        writeln!(output, "    ($($arguments:tt)*) => {{")?;
+        Self::emit_invocation(
+            output,
+            plan,
+            InvocationEmission {
+                mode: "direct",
+                allow_missing_formatter: "false",
+                locale: "",
+                formatter: "",
+                sink: "",
+                arguments: "$($arguments)*",
+            },
+        )?;
         writeln!(output, "    }};")?;
         writeln!(output, "}}\n")?;
         Ok(())
@@ -158,9 +165,7 @@ impl MessageEmitter {
     fn emit_invocation(
         output: &mut String,
         plan: &MessagePlan<'_>,
-        locale: &str,
-        formatter: &str,
-        arguments: &str,
+        invocation: InvocationEmission<'_>,
     ) -> Result<(), FmtError> {
         let parameters = plan
             .message
@@ -175,20 +180,38 @@ impl MessageEmitter {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(output, "        ::u18n::__invoke_message! {{")?;
         writeln!(
             output,
-            "            [{}, {}, [{}]]",
-            plan.needs_formatter, plan.cow_macro_output, parameters
+            "        $crate::__u18n_runtime::__invoke_message! {{"
         )?;
-        writeln!(output, "            {{ {locale} }}")?;
+        writeln!(
+            output,
+            "            @{} [{}, {}, {}, [$crate::__u18n_runtime], [{}]]",
+            invocation.mode,
+            plan.needs_formatter,
+            plan.cow_macro_output,
+            invocation.allow_missing_formatter,
+            parameters
+        )?;
+        if invocation.mode == "direct" {
+            writeln!(
+                output,
+                "            {{ &$crate::catalogs::__MESSAGE_DATA_{} }}",
+                plan.message_id
+            )?;
+            writeln!(output, "            {}", invocation.arguments)?;
+            writeln!(output, "        }}")?;
+            return Ok(());
+        }
+        writeln!(output, "            {{ {} }}", invocation.locale)?;
         writeln!(
             output,
             "            {{ &$crate::catalogs::__MESSAGE_DATA_{} }}",
             plan.message_id
         )?;
-        writeln!(output, "            {{ {formatter} }}")?;
-        writeln!(output, "            {{ {arguments} }}")?;
+        writeln!(output, "            {{ {} }}", invocation.formatter)?;
+        writeln!(output, "            {{ {} }}", invocation.sink)?;
+        writeln!(output, "            {{ {} }}", invocation.arguments)?;
         writeln!(output, "        }}")?;
         Ok(())
     }

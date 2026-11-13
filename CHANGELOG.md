@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.4.0]
+
+### Added
+
+- Generated `m_*` and `t!` macros can render directly into a caller-owned `core::fmt::Write`
+  writer with `sink: &mut writer`. Sink calls append to existing content and return
+  `Result<(), RenderError>`. Write and formatting errors propagate, and a failure may leave partial
+  output in the writer. A sink call to `t!` propagates errors even when a fixed render-error
+  fallback is configured; the fallback applies only to text-returning calls. Sink calls may omit a
+  formatter, but rendering reports `FormatterRequired` if the selected message needs one.
+- Generated macros resolve runtime APIs through a hidden `$crate`-anchored re-export, so they also
+  work when the `u18n` dependency is renamed in `Cargo.toml`.
+
+### Changed
+
+- Generated `m_*` calls now take a `locale` field and, when needed, a `formatter` field. Message
+  parameters belong in a complete named `args: { ... }` object. These fields may appear in any
+  order. Control expressions are evaluated in `locale`, `formatter`, `sink` order; argument
+  expressions are evaluated in written order, then passed to the renderer in schema order. A
+  direct `m_*` call always requires `locale`.
+- Structured `t!` calls now select a message with `name: "key"` and accept the same `locale`,
+  `formatter`, `sink`, and `args` fields. Non-atomic builds require `locale`; atomic builds may
+  omit it. The zero-argument `t!("key")` shorthand remains available.
+
+### Breaking changes
+
+This changes the generated macro syntax and requires updating existing calls. Positional message
+arguments, `=` control fields, and key-first `t!` calls with additional fields are no longer
+accepted. Rewrite calls as follows:
+
+| Before | Now |
+| --- | --- |
+| `m_greeting!(locale, "Ada")` | `m_greeting! { locale: locale, args: { name: "Ada" } }` |
+| `m_items!(locale = locale, { count })` | `m_items! { locale: locale, args: { count } }` |
+| `t!("cart.items", locale = locale, { count })` | `t! { name: "cart.items", locale: locale, args: { count } }` |
+| `t!("app.title")` | Unchanged for zero-parameter messages |
+
+See the [Quickstart migration table](docs/quickstart.md#5-render-a-message) for additional details.
+
 ## [0.3.1]
 
 ### Added

@@ -326,14 +326,17 @@ fn cow_macro_output_option_is_opt_in_compile_only_and_rejects_duplicates()
     check(default.status.success());
     let default_source = String::from_utf8(default.stdout)?;
     check(default_source.contains("cow-macro-output=false"));
-    check(default_source.contains("[false, false, []]"));
+    check(default_source.contains("@direct [false, false, false, [$crate::__u18n_runtime], []]"));
 
     let enabled = fixture.run_with_options("compile", schema, &locales, &["--cow-macro-output"])?;
     check(enabled.status.success());
     let enabled_source = String::from_utf8(enabled.stdout)?;
     check(enabled_source.contains("cow-macro-output=true"));
-    check(enabled_source.contains("[false, true, []]"));
-    check(enabled_source.contains("[false, true, [(name, string)]]"));
+    check(enabled_source.contains("@direct [false, true, false, [$crate::__u18n_runtime], []]"));
+    check(
+        enabled_source
+            .contains("@direct [false, true, false, [$crate::__u18n_runtime], [(name, string)]]"),
+    );
     check(enabled_source.contains("output-format-version=3"));
 
     let duplicate = fixture.run_with_options(
@@ -552,7 +555,7 @@ fn compiles_typed_formatters_and_ordinal_plural_rules() -> Result<(), Box<dyn Er
     check(generated.contains("FormatOptions::Decimal"));
     check(generated.contains("PluralKind::Ordinal"));
     check(generated.contains("RuleSet { kind: PluralKind::Ordinal"));
-    check(generated.contains("$formatter:expr"));
+    check(generated.contains("$($formatter:tt)*"));
     check(generated.contains("rank, ordinal_count"));
 
     let invalid = fixture.compile(
@@ -938,7 +941,7 @@ fn emits_typed_message_macros_without_dto_apis() -> Result<(), Box<dyn Error>> {
     check(generated.contains("macro_rules! m_test_sformatted"));
     check(generated.contains("(a, string), (b, number), (c, plural_count)"));
     check(generated.contains("(a, decimal), (b, money), (c, string), (d, number)"));
-    check(generated.contains("$formatter:expr"));
+    check(generated.contains("$($formatter:tt)*"));
     check(!generated.contains("pub mod args"));
     check(!generated.contains("pub struct Args"));
     check(!generated.contains("Messages"));

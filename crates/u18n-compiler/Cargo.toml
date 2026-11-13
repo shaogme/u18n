@@ -3,7 +3,6 @@ name = "u18n-compiler"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Compile typed schemas and locale catalogs into static Rust localization catalogs."

@@ -40,71 +40,65 @@ fn main() -> Result<(), Box<dyn Error>> {
     let formatter = ShowcaseFormatter;
     let mut output = io::stdout().lock();
 
-    writeln!(output, "{}", m_app_stitle!(english)?)?;
+    writeln!(output, "{}", m_app_stitle! { locale: english }?)?;
     writeln!(
         output,
         "{}",
-        m_cart_sitems!(english, PluralCount::new(0), "Ada", "other")?
+        m_cart_sitems! { locale: english, args: {count: PluralCount::new(0), owner: "Ada", gender: "other"} }?
     )?;
     writeln!(
         output,
         "{}",
-        m_cart_sitems!(english, PluralCount::new(1), "Ada", "female")?
+        m_cart_sitems! { locale: english, args: {count: PluralCount::new(1), owner: "Ada", gender: "female"} }?
     )?;
     writeln!(
         output,
         "{}",
-        m_cart_sitems!(english, PluralCount::new(3), "Ada", "male")?
-    )?;
-    writeln!(output, "{}", m_cart_stotal!(english, 19.95, "USD")?)?;
-    writeln!(
-        output,
-        "{}",
-        m_cart_sitems!(spanish, PluralCount::new(2), "Ada", "female")?
-    )?;
-    writeln!(output, "{}", m_cart_stotal!(spanish, 19.95, "USD")?)?;
-    writeln!(
-        output,
-        "{}",
-        m_checkout_sorder_usummary!(
-            spanish,
-            {
-                customer: "Ada",
-                product: "tazas",
-                quantity: PluralCount::new(3),
-                total: 19.95,
-                currency: "USD",
-            }
-        )?
+        m_cart_sitems! { locale: english, args: {count: PluralCount::new(3), owner: "Ada", gender: "male"} }?
     )?;
     writeln!(
         output,
         "{}",
-        m_cart_styped_utotal!(
-            spanish,
-            &formatter,
-            Decimal::new(1995, 2),
-            require_value(
-                Money::new(Decimal::new(1234, 2), "USD"),
-                "valid currency code"
-            )?,
-        )?
+        m_cart_stotal! { locale: english, args: {amount: 19.95, currency: "USD"} }?
     )?;
     writeln!(
         output,
         "{}",
-        m_event_swhen!(
-            spanish,
-            &formatter,
-            require_value(CivilDate::new(2026, 7, 4), "valid date")?,
-            require_value(CivilTime::new(9, 30, 0, 0), "valid time")?,
-            require_value(Instant::new(1_783_150_200, 0), "valid instant")?,
-        )?
+        m_cart_sitems! { locale: spanish, args: {count: PluralCount::new(2), owner: "Ada", gender: "female"} }?
     )?;
     writeln!(
         output,
         "{}",
-        m_rank_sposition!(english, OrdinalCount::new(22))?
+        m_cart_stotal! { locale: spanish, args: {amount: 19.95, currency: "USD"} }?
+    )?;
+    writeln!(
+        output,
+        "{}",
+        m_checkout_sorder_usummary! { locale: spanish, args: {
+            customer: "Ada",
+            product: "tazas",
+            quantity: PluralCount::new(3),
+            total: 19.95,
+            currency: "USD",
+        } }?
+    )?;
+    writeln!(
+        output,
+        "{}",
+        m_cart_styped_utotal! { locale: spanish, formatter: &formatter, args: {amount: Decimal::new(1995, 2), charge: require_value(
+            Money::new(Decimal::new(1234, 2), "USD"),
+            "valid currency code"
+        )?} }?
+    )?;
+    writeln!(
+        output,
+        "{}",
+        m_event_swhen! { locale: spanish, formatter: &formatter, args: {day: require_value(CivilDate::new(2026, 7, 4), "valid date")?, clock: require_value(CivilTime::new(9, 30, 0, 0), "valid time")?, moment: require_value(Instant::new(1_783_150_200, 0), "valid instant")?} }?
+    )?;
+    writeln!(
+        output,
+        "{}",
+        m_rank_sposition! { locale: english, args: {rank: OrdinalCount::new(22)} }?
     )?;
 
     Ok(())

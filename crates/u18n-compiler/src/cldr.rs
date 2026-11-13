@@ -1,14 +1,14 @@
 mod rules;
 mod tag;
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use crate::fingerprint::Fingerprint;
-
-use rules::RulesParser;
 pub(super) use rules::{
     ConjunctionData, DecimalData, OperandData, PredicateData, RangeData, RuleData, RuleSetData,
 };
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::fingerprint::Fingerprint;
+use rules::RulesParser;
 use tag::{AliasData, AliasParser, Registry, RegistryParser, TagValidator};
 use u18n_ast::PluralKind;
 

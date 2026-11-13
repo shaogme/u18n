@@ -3,7 +3,6 @@ name = "u18n-ast"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Shared source-spanned AST types for u18n schema and locale formats."

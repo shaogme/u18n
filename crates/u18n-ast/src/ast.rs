@@ -1,9 +1,9 @@
-use alloc::{string::String, vec::Vec};
-
 pub use pattern::{
     CurrencyPrecision, FormatOptions, FormatStyle, Grouping, Pattern, PatternPart, PluralBranch,
     PluralCase, PluralCategory, PluralKind, Precision, Rounding, SelectBranch,
 };
+
+use alloc::{string::String, vec::Vec};
 
 /// Identifies one source file within a compilation input set.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -112,14 +112,14 @@ pub struct LocaleAst {
 }
 
 mod pattern {
-    use alloc::vec::Vec;
-
-    use super::Span;
-
     pub use nodes::{
         CurrencyPrecision, FormatOptions, FormatStyle, Grouping, PatternPart, PluralBranch,
         PluralCase, PluralCategory, PluralKind, Precision, Rounding, SelectBranch,
     };
+
+    use alloc::vec::Vec;
+
+    use super::Span;
 
     /// An ordered sequence of typed tokens in a message pattern.
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]

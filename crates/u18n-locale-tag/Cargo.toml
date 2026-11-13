@@ -3,7 +3,6 @@ name = "u18n-locale-tag"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "A borrowed BCP 47 syntax parser and packed locale-key codec."

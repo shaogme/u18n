@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use proc_macro2::{Delimiter, Group, Span, TokenStream as TokenStream2, TokenTree};
 use quote::{format_ident, quote, quote_spanned};
 use syn::{
-    Error as SynError, Expr, Ident, LitBool, LitInt, Result, Token, bracketed,
+    Error as SynError, Expr, Ident, LitBool, LitInt, LitStr, Path, Result, Token, braced,
+    bracketed,
     ext::IdentExt,
     parenthesized,
     parse::{Parse, ParseStream, Parser},
@@ -11,6 +12,9 @@ use syn::{
     punctuated::Punctuated,
     spanned::Spanned,
 };
+
+#[cfg(test)]
+use syn::parse_quote;
 
 #[derive(Clone, Copy)]
 enum ArgumentKind {
@@ -34,7 +38,17 @@ struct ParameterSpec {
 struct InvocationMetadata {
     needs_formatter: bool,
     cow_macro_output: bool,
+    allow_missing_formatter: bool,
+    runtime_anchor: Path,
     parameters: Vec<ParameterSpec>,
+}
+
+pub(super) struct InvocationFields {
+    name: Option<LitStr>,
+    locale: Option<Expr>,
+    formatter: Option<Expr>,
+    sink: Option<Expr>,
+    arguments: Option<TokenStream2>,
 }
 
 struct NamedField {
@@ -49,6 +63,14 @@ struct BoundArguments {
     schema_slots: Vec<usize>,
 }
 
+struct RenderInvocation {
+    locale: Expr,
+    message_data: Expr,
+    formatter: Option<Expr>,
+    sink: Option<Expr>,
+    arguments: BoundArguments,
+}
+
 pub(super) struct InvocationExpansion;
 
 impl Parse for InvocationMetadata {
@@ -56,6 +78,15 @@ impl Parse for InvocationMetadata {
         let needs_formatter = input.parse::<LitBool>()?.value;
         input.parse::<Token![,]>()?;
         let cow_macro_output = input.parse::<LitBool>()?.value;
+        input.parse::<Token![,]>()?;
+        let allow_missing_formatter = input.parse::<LitBool>()?.value;
+        input.parse::<Token![,]>()?;
+        let runtime_content;
+        bracketed!(runtime_content in input);
+        let runtime_anchor = runtime_content.parse::<Path>()?;
+        if !runtime_content.is_empty() {
+            return Err(runtime_content.error("unexpected tokens in generated runtime anchor"));
+        }
         input.parse::<Token![,]>()?;
         let parameters_content;
         bracketed!(parameters_content in input);
@@ -67,8 +98,129 @@ impl Parse for InvocationMetadata {
         Ok(Self {
             needs_formatter,
             cow_macro_output,
+            allow_missing_formatter,
+            runtime_anchor,
             parameters,
         })
+    }
+}
+
+impl Parse for InvocationFields {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut name = None;
+        let mut locale = None;
+        let mut formatter = None;
+        let mut sink = None;
+        let mut arguments = None;
+
+        while !input.is_empty() {
+            let field_name = if input.peek(LitStr) {
+                return Err(input
+                    .error("key-first `t!` calls are no longer supported; use `name: \"key\"`"));
+            } else if input.peek(Ident::peek_any) {
+                input.call(Ident::parse_any)?
+            } else {
+                return Err(input.error(
+                    "expected a named field; use `locale: expression` and `args: { ... }`",
+                ));
+            };
+            let field_text = field_name.unraw().to_string();
+            if !input.peek(Token![:]) {
+                let message = if input.peek(Token![=]) {
+                    format!(
+                        "legacy `{field_text} = ...` syntax is no longer supported; use `{field_text}: ...`"
+                    )
+                } else {
+                    format!(
+                        "expected `:` after `{field_text}`; message parameters must use `args: {{ ... }}`"
+                    )
+                };
+                return Err(SynError::new(field_name.span(), message));
+            }
+            input.parse::<Token![:]>()?;
+            match field_text.as_str() {
+                "name" => {
+                    if name.is_some() {
+                        return Err(SynError::new(field_name.span(), "duplicate `name` field"));
+                    }
+                    name = Some(input.parse::<LitStr>().map_err(|_| {
+                        SynError::new(field_name.span(), "`name` must be a string literal")
+                    })?);
+                }
+                "locale" | "formatter" | "sink" => {
+                    let target = match field_text.as_str() {
+                        "locale" => &mut locale,
+                        "formatter" => &mut formatter,
+                        _ => &mut sink,
+                    };
+                    if target.is_some() {
+                        return Err(SynError::new(
+                            field_name.span(),
+                            format!("duplicate `{field_text}` field"),
+                        ));
+                    }
+                    *target = Some(input.parse::<Expr>()?);
+                }
+                "args" => {
+                    if arguments.is_some() {
+                        return Err(SynError::new(field_name.span(), "duplicate `args` field"));
+                    }
+                    let content;
+                    braced!(content in input);
+                    let argument_tokens = content.parse::<TokenStream2>()?;
+                    parse_named_fields(argument_tokens.clone())?;
+                    arguments = Some(argument_tokens);
+                }
+                _ => {
+                    return Err(SynError::new(
+                        field_name.span(),
+                        format!(
+                            "unknown field `{field_text}`; expected `name`, `locale`, `formatter`, `sink`, or `args`"
+                        ),
+                    ));
+                }
+            }
+            if !input.is_empty() {
+                if !input.peek(Token![,]) {
+                    return Err(input.error("expected `,` between fields"));
+                }
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(Self {
+            name,
+            locale,
+            formatter,
+            sink,
+            arguments,
+        })
+    }
+}
+
+impl InvocationFields {
+    pub(super) fn parse_tokens(tokens: TokenStream2) -> Result<Self> {
+        parse2(tokens)
+    }
+
+    pub(super) fn name(&self) -> Option<&LitStr> {
+        self.name.as_ref()
+    }
+
+    pub(super) fn locale(&self) -> Option<&Expr> {
+        self.locale.as_ref()
+    }
+
+    pub(super) fn formatter(&self) -> Option<&Expr> {
+        self.formatter.as_ref()
+    }
+
+    pub(super) fn sink(&self) -> Option<&Expr> {
+        self.sink.as_ref()
+    }
+
+    pub(super) fn arguments(&self) -> Option<&TokenStream2> {
+        self.arguments.as_ref()
     }
 }
 
@@ -239,41 +391,112 @@ impl NamedField {
 impl InvocationExpansion {
     pub(super) fn expand(input: TokenStream2) -> Result<TokenStream2> {
         let mut tokens = input.into_iter();
-        let metadata_group = take_group(&mut tokens, Delimiter::Bracket, "signature metadata")?;
-        let locale_group = take_group(&mut tokens, Delimiter::Brace, "locale expression")?;
-        let message_data_group = take_group(&mut tokens, Delimiter::Brace, "message shard")?;
-        let formatter_group = take_group(&mut tokens, Delimiter::Brace, "formatter expression")?;
-        let arguments_group = take_group(&mut tokens, Delimiter::Brace, "argument values")?;
-        if let Some(extra) = tokens.next() {
-            return Err(SynError::new(
-                extra.span(),
-                "unexpected tokens after generated message invocation",
-            ));
-        }
-
-        let metadata = parse2::<InvocationMetadata>(metadata_group.stream())?;
-        let locale = parse_group_expression(locale_group, "locale")?;
-        let message_data = parse_group_expression(message_data_group, "message shard")?;
-        let formatter = if metadata.needs_formatter {
-            if formatter_group.stream().is_empty() {
-                None
-            } else {
-                Some(parse_group_expression(formatter_group, "formatter")?)
+        match tokens.next() {
+            Some(TokenTree::Punct(punctuation)) if punctuation.as_char() == '@' => {}
+            Some(tree) => {
+                return Err(SynError::new(
+                    tree.span(),
+                    "expected generated invocation mode",
+                ));
             }
-        } else if formatter_group.stream().is_empty() {
-            None
-        } else {
-            return Err(SynError::new(
-                formatter_group.span(),
-                "message does not accept a formatter",
-            ));
+            None => {
+                return Err(SynError::new(
+                    Span::call_site(),
+                    "missing generated invocation mode",
+                ));
+            }
+        }
+        let mode = match tokens.next() {
+            Some(TokenTree::Ident(identifier)) => identifier.to_string(),
+            Some(tree) => return Err(SynError::new(tree.span(), "expected invocation mode")),
+            None => {
+                return Err(SynError::new(Span::call_site(), "missing invocation mode"));
+            }
         };
-        let arguments = parse_arguments(
-            arguments_group.stream(),
-            &metadata.parameters,
-            arguments_group.span(),
-        )?;
-        emit_render_expression(metadata, locale, message_data, formatter, arguments)
+        let metadata_group = take_group(&mut tokens, Delimiter::Bracket, "signature metadata")?;
+        let metadata = parse2::<InvocationMetadata>(metadata_group.stream())?;
+        match mode.as_str() {
+            "direct" => {
+                let message_data_group =
+                    take_group(&mut tokens, Delimiter::Brace, "message shard")?;
+                let raw_arguments = tokens.collect::<TokenStream2>();
+                let fields = InvocationFields::parse_tokens(raw_arguments)?;
+                if let Some(name) = fields.name() {
+                    return Err(SynError::new(
+                        name.span(),
+                        "per-message macros do not accept `name`; remove that field",
+                    ));
+                }
+                let locale = fields.locale().cloned().ok_or_else(|| {
+                    SynError::new(
+                        Span::call_site(),
+                        "per-message calls require a `locale: expression` field",
+                    )
+                })?;
+                let message_data = parse_group_expression(message_data_group, "message shard")?;
+                let arguments = parse_arguments(
+                    fields.arguments().cloned(),
+                    &metadata.parameters,
+                    Span::call_site(),
+                )?;
+                emit_render_expression(
+                    metadata,
+                    RenderInvocation {
+                        locale,
+                        message_data,
+                        formatter: fields.formatter().cloned(),
+                        sink: fields.sink().cloned(),
+                        arguments,
+                    },
+                )
+            }
+            "dispatch" => {
+                let locale_group = take_group(&mut tokens, Delimiter::Brace, "locale expression")?;
+                let message_data_group =
+                    take_group(&mut tokens, Delimiter::Brace, "message shard")?;
+                let formatter_group =
+                    take_group(&mut tokens, Delimiter::Brace, "formatter expression")?;
+                let sink_group = take_group(&mut tokens, Delimiter::Brace, "sink expression")?;
+                let arguments_group = take_group(&mut tokens, Delimiter::Brace, "argument values")?;
+                if let Some(extra) = tokens.next() {
+                    return Err(SynError::new(
+                        extra.span(),
+                        "unexpected tokens after generated message invocation",
+                    ));
+                }
+                let locale = parse_group_expression(locale_group, "locale")?;
+                let message_data = parse_group_expression(message_data_group, "message shard")?;
+                let formatter = if formatter_group.stream().is_empty() {
+                    None
+                } else {
+                    Some(parse_group_expression(formatter_group, "formatter")?)
+                };
+                let sink = if sink_group.stream().is_empty() {
+                    None
+                } else {
+                    Some(parse_group_expression(sink_group, "sink")?)
+                };
+                let arguments = parse_arguments(
+                    Some(arguments_group.stream()),
+                    &metadata.parameters,
+                    arguments_group.span(),
+                )?;
+                emit_render_expression(
+                    metadata,
+                    RenderInvocation {
+                        locale,
+                        message_data,
+                        formatter,
+                        sink,
+                        arguments,
+                    },
+                )
+            }
+            _ => Err(SynError::new(
+                Span::call_site(),
+                "unknown generated invocation mode",
+            )),
+        }
     }
 }
 
@@ -306,51 +529,12 @@ fn parse_group_expression(group: Group, description: &str) -> Result<Expr> {
 }
 
 fn parse_arguments(
-    tokens: TokenStream2,
+    tokens: Option<TokenStream2>,
     parameters: &[ParameterSpec],
     argument_span: Span,
 ) -> Result<BoundArguments> {
-    let token_trees = tokens.into_iter().collect::<Vec<_>>();
-    let first = token_trees.first();
-    let mut named_parse_error = None;
-    if let Some(TokenTree::Group(group)) = first
-        && group.delimiter() == Delimiter::Brace
-    {
-        if token_trees.len() == 1 {
-            match parse_named_fields(group.stream()) {
-                Ok(fields) => return bind_named_arguments(parameters, fields, argument_span),
-                Err(error) => named_parse_error = Some(error),
-            }
-        }
-        if token_trees.len() > 1 && parse_named_fields(group.stream()).is_ok() {
-            return Err(SynError::new(
-                group.span(),
-                "cannot mix named and positional message arguments",
-            ));
-        }
-    }
-
-    let expressions = match Punctuated::<Expr, Token![,]>::parse_terminated
-        .parse2(token_trees.into_iter().collect())
-    {
-        Ok(expressions) => expressions.into_iter().collect::<Vec<_>>(),
-        Err(error) => return Err(named_parse_error.unwrap_or(error)),
-    };
-    if expressions.len() != parameters.len() {
-        return Err(SynError::new(
-            argument_span,
-            format!(
-                "expected {} positional message arguments but received {}",
-                parameters.len(),
-                expressions.len()
-            ),
-        ));
-    }
-    let schema_slots = (0..parameters.len()).collect::<Vec<_>>();
-    Ok(BoundArguments {
-        evaluation_order: expressions,
-        schema_slots,
-    })
+    let fields = tokens.map_or_else(|| Ok(Vec::new()), parse_named_fields)?;
+    bind_named_arguments(parameters, fields, argument_span)
 }
 
 fn parse_named_fields(tokens: TokenStream2) -> Result<Vec<NamedField>> {
@@ -400,6 +584,7 @@ fn bind_named_arguments(
     }
 
     let mut schema_slots = Vec::with_capacity(parameters.len());
+    let mut missing = Vec::new();
     for (index, slot) in schema_to_evaluation.into_iter().enumerate() {
         match slot {
             Some(evaluation_index) => schema_slots.push(evaluation_index),
@@ -407,12 +592,22 @@ fn bind_named_arguments(
                 let parameter = parameters.get(index).ok_or_else(|| {
                     SynError::new(argument_span, "invalid message signature metadata")
                 })?;
-                return Err(SynError::new(
-                    argument_span,
-                    format!("missing named message argument `{}`", parameter.name),
-                ));
+                missing.push(parameter.name.as_str());
             }
         }
+    }
+    if !missing.is_empty() {
+        let missing_names = missing
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let message = if missing.len() == 1 {
+            format!("missing named message argument {missing_names}")
+        } else {
+            format!("missing named message arguments {missing_names}")
+        };
+        return Err(SynError::new(argument_span, message));
     }
     Ok(BoundArguments {
         evaluation_order,
@@ -422,31 +617,40 @@ fn bind_named_arguments(
 
 fn emit_render_expression(
     metadata: InvocationMetadata,
-    locale: Expr,
-    message_data: Expr,
-    formatter: Option<Expr>,
-    arguments: BoundArguments,
+    invocation: RenderInvocation,
 ) -> Result<TokenStream2> {
+    let RenderInvocation {
+        locale,
+        message_data,
+        formatter,
+        sink,
+        arguments,
+    } = invocation;
     let locale_binding = format_ident!("__u18n_locale", span = Span::mixed_site());
     let message_data_binding = format_ident!("__u18n_message_data", span = Span::mixed_site());
     let formatter_binding = format_ident!("__u18n_formatter", span = Span::mixed_site());
-    if metadata.parameters.is_empty() {
-        if metadata.needs_formatter || formatter.is_some() {
-            return Err(SynError::new(
-                Span::call_site(),
-                "zero-argument message cannot require a formatter",
-            ));
-        }
-        let render = if metadata.cow_macro_output {
-            quote!(#message_data_binding.render(#locale_binding, &[]))
-        } else {
-            quote!(#message_data_binding.render_static(#locale_binding))
-        };
-        return Ok(quote! {{
-            let #locale_binding = #locale;
-            let #message_data_binding = #message_data;
-            #render
-        }});
+    let sink_binding = format_ident!("__u18n_sink", span = Span::mixed_site());
+    if metadata.needs_formatter
+        && formatter.is_none()
+        && sink.is_none()
+        && !metadata.allow_missing_formatter
+    {
+        return Err(SynError::new(
+            Span::call_site(),
+            "message requires a `formatter: expression` field when no sink is specified",
+        ));
+    }
+    if !metadata.needs_formatter && formatter.is_some() {
+        return Err(SynError::new(
+            Span::call_site(),
+            "message does not accept a formatter",
+        ));
+    }
+    if metadata.parameters.is_empty() && metadata.needs_formatter {
+        return Err(SynError::new(
+            Span::call_site(),
+            "zero-argument message cannot require a formatter",
+        ));
     }
     let argument_bindings = (0..arguments.evaluation_order.len())
         .map(|index| format_ident!("__u18n_value_{index}", span = Span::mixed_site()))
@@ -467,10 +671,15 @@ fn emit_render_expression(
         let binding = argument_bindings
             .get(*evaluation_index)
             .ok_or_else(|| SynError::new(Span::call_site(), "invalid message argument mapping"))?;
-        argument_values.push(argument_value(parameter.kind, binding));
+        argument_values.push(argument_value(
+            parameter.kind,
+            binding,
+            &metadata.runtime_anchor,
+        ));
     }
 
     let argument_count = LitInt::new(&metadata.parameters.len().to_string(), Span::call_site());
+    let runtime_anchor = &metadata.runtime_anchor;
     let argument_values = quote! { #(#argument_values),* };
     let has_formatter = formatter.is_some();
     let cow_macro_output = metadata.cow_macro_output;
@@ -479,68 +688,131 @@ fn emit_render_expression(
     } else {
         quote! {}
     };
-    if metadata.needs_formatter {
-        let render = if has_formatter {
-            let method = if cow_macro_output {
-                quote!(render_with)
+    let sink_binding_statement = if let Some(sink_expression) = sink {
+        quote_spanned!(sink_expression.span()=> let #sink_binding = #sink_expression;)
+    } else {
+        quote! {}
+    };
+
+    if metadata.parameters.is_empty() {
+        let render = if sink_binding_statement.is_empty() {
+            if metadata.cow_macro_output {
+                quote!(#message_data_binding.render(#locale_binding, &[]))
             } else {
-                quote!(render_with_owned)
-            };
-            quote!(#message_data_binding.#method(
-                #locale_binding,
-                #formatter_binding,
-                &__u18n_arguments
-            ))
+                quote!(#message_data_binding.render_static(#locale_binding))
+            }
         } else {
-            let method = if cow_macro_output {
-                quote!(render)
-            } else {
-                quote!(render_owned)
-            };
-            quote!(#message_data_binding.#method(
+            quote!(#message_data_binding.render_to(
                 #locale_binding,
-                &__u18n_arguments
+                &[],
+                &mut *#sink_binding
             ))
+        };
+        return Ok(quote! {{
+            let #locale_binding = #locale;
+            let #message_data_binding = #message_data;
+            #sink_binding_statement
+            #render
+        }});
+    }
+
+    if metadata.needs_formatter {
+        let render = if sink_binding_statement.is_empty() {
+            if has_formatter {
+                let method = if cow_macro_output {
+                    quote!(render_with)
+                } else {
+                    quote!(render_with_owned)
+                };
+                quote!(#message_data_binding.#method(
+                    #locale_binding,
+                    #formatter_binding,
+                    &__u18n_arguments
+                ))
+            } else {
+                let method = if cow_macro_output {
+                    quote!(render)
+                } else {
+                    quote!(render_owned)
+                };
+                quote!(#message_data_binding.#method(
+                    #locale_binding,
+                    &__u18n_arguments
+                ))
+            }
+        } else {
+            if has_formatter {
+                quote!(#message_data_binding.render_with_to(
+                    #locale_binding,
+                    #formatter_binding,
+                    &__u18n_arguments,
+                    &mut *#sink_binding
+                ))
+            } else {
+                quote!(#message_data_binding.render_to(
+                #locale_binding,
+                    &__u18n_arguments,
+                    &mut *#sink_binding
+                ))
+            }
         };
         Ok(quote! {{
             let #locale_binding = #locale;
             let #message_data_binding = #message_data;
             #formatter_binding_statement
+            #sink_binding_statement
             #(#argument_binding_statements)*
-            let __u18n_arguments: [::u18n::ArgumentValue<'_>; #argument_count] = [#argument_values];
+            let __u18n_arguments: [#runtime_anchor::ArgumentValue<'_>; #argument_count] = [#argument_values];
             #render
         }})
     } else {
-        let method = if cow_macro_output {
-            quote!(render)
+        let render = if sink_binding_statement.is_empty() {
+            let method = if cow_macro_output {
+                quote!(render)
+            } else {
+                quote!(render_owned)
+            };
+            quote!(#message_data_binding.#method(#locale_binding, &__u18n_arguments))
         } else {
-            quote!(render_owned)
+            quote!(#message_data_binding.render_to(
+                #locale_binding,
+                &__u18n_arguments,
+                &mut *#sink_binding
+            ))
         };
         Ok(quote! {{
             let #locale_binding = #locale;
             let #message_data_binding = #message_data;
+            #sink_binding_statement
             #(#argument_binding_statements)*
-            let __u18n_arguments: [::u18n::ArgumentValue<'_>; #argument_count] = [#argument_values];
-            #message_data_binding.#method(#locale_binding, &__u18n_arguments)
+            let __u18n_arguments: [#runtime_anchor::ArgumentValue<'_>; #argument_count] = [#argument_values];
+            #render
         }})
     }
 }
 
-fn argument_value(kind: ArgumentKind, binding: &Ident) -> TokenStream2 {
+fn argument_value(kind: ArgumentKind, binding: &Ident, runtime_anchor: &Path) -> TokenStream2 {
     match kind {
-        ArgumentKind::String => quote!(::u18n::ArgumentValue::String(#binding)),
-        ArgumentKind::Number => quote!(::u18n::ArgumentValue::Number(&#binding)),
-        ArgumentKind::PluralCount => quote!(::u18n::ArgumentValue::PluralCount(#binding)),
-        ArgumentKind::PluralDecimal => quote!(::u18n::ArgumentValue::PluralDecimal(#binding)),
-        ArgumentKind::OrdinalCount => quote!(::u18n::ArgumentValue::OrdinalCount(#binding)),
-        ArgumentKind::Decimal => quote!(::u18n::ArgumentValue::Decimal(#binding)),
-        ArgumentKind::Money => quote!(::u18n::ArgumentValue::Money(#binding)),
-        ArgumentKind::Date => quote!(::u18n::ArgumentValue::Date(#binding)),
-        ArgumentKind::Time => quote!(::u18n::ArgumentValue::Time(#binding)),
-        ArgumentKind::Instant => quote!(::u18n::ArgumentValue::Instant(#binding)),
+        ArgumentKind::String => quote!(#runtime_anchor::ArgumentValue::String(#binding)),
+        ArgumentKind::Number => quote!(#runtime_anchor::ArgumentValue::Number(&#binding)),
+        ArgumentKind::PluralCount => {
+            quote!(#runtime_anchor::ArgumentValue::PluralCount(#binding))
+        }
+        ArgumentKind::PluralDecimal => {
+            quote!(#runtime_anchor::ArgumentValue::PluralDecimal(#binding))
+        }
+        ArgumentKind::OrdinalCount => {
+            quote!(#runtime_anchor::ArgumentValue::OrdinalCount(#binding))
+        }
+        ArgumentKind::Decimal => quote!(#runtime_anchor::ArgumentValue::Decimal(#binding)),
+        ArgumentKind::Money => quote!(#runtime_anchor::ArgumentValue::Money(#binding)),
+        ArgumentKind::Date => quote!(#runtime_anchor::ArgumentValue::Date(#binding)),
+        ArgumentKind::Time => quote!(#runtime_anchor::ArgumentValue::Time(#binding)),
+        ArgumentKind::Instant => quote!(#runtime_anchor::ArgumentValue::Instant(#binding)),
     }
 }
 
+#[cfg(test)]
 #[test]
 fn binds_named_values_in_source_order_and_schema_order() {
     let parameters = vec![
@@ -553,8 +825,8 @@ fn binds_named_values_in_source_order_and_schema_order() {
             kind: ArgumentKind::Number,
         },
     ];
-    let input: TokenStream2 = quote!({ second: right(), first, });
-    let result = parse_arguments(input, &parameters, Span::call_site());
+    let input: TokenStream2 = quote!(second: right(), first,);
+    let result = parse_arguments(Some(input), &parameters, Span::call_site());
 
     assert!(result.is_ok());
     let Some(arguments) = result.ok() else {
@@ -564,6 +836,7 @@ fn binds_named_values_in_source_order_and_schema_order() {
     assert_eq!(arguments.evaluation_order.len(), 2);
 }
 
+#[cfg(test)]
 #[test]
 fn rejects_missing_extra_duplicate_unknown_mixed_and_wrong_arity() {
     let parameters = vec![
@@ -576,18 +849,16 @@ fn rejects_missing_extra_duplicate_unknown_mixed_and_wrong_arity() {
             kind: ArgumentKind::Number,
         },
     ];
-    let invalid_inputs: [TokenStream2; 6] = [
-        quote!({ first: value }),
-        quote!({ first: a, second: b, extra: c }),
-        quote!({ first: a, first: b }),
-        quote!({ unknown: value, second: other }),
-        quote!({ first: value }, other),
-        quote!(one, two, three),
+    let invalid_inputs: [TokenStream2; 4] = [
+        quote!(first: value),
+        quote!(first: a, second: b, extra: c),
+        quote!(first: a, first: b),
+        quote!(unknown: value, second: other),
     ];
     for input in invalid_inputs {
-        assert!(parse_arguments(input, &parameters, Span::call_site()).is_err());
+        assert!(parse_arguments(Some(input), &parameters, Span::call_site()).is_err());
     }
-    let named_error = parse_arguments(quote!({ first: value }), &parameters, Span::call_site())
+    let named_error = parse_arguments(Some(quote!(first: value)), &parameters, Span::call_site())
         .err()
         .map(|error| error.to_string());
     assert!(
@@ -596,33 +867,75 @@ fn rejects_missing_extra_duplicate_unknown_mixed_and_wrong_arity() {
     );
 }
 
+#[cfg(test)]
 #[test]
-fn accepts_zero_argument_positional_and_named_forms() {
+fn permits_omitted_or_empty_arguments_only_for_zero_argument_messages() {
     let parameters = Vec::new();
-    let positional = parse_arguments(TokenStream2::new(), &parameters, Span::call_site());
-    let named = parse_arguments(quote!({}), &parameters, Span::call_site());
+    let omitted = parse_arguments(None, &parameters, Span::call_site());
+    let named = parse_arguments(Some(TokenStream2::new()), &parameters, Span::call_site());
 
-    assert!(positional.is_ok());
+    assert!(omitted.is_ok());
     assert!(named.is_ok());
 }
 
+#[cfg(test)]
+#[test]
+fn formatter_requirement_changes_only_for_sink_and_fixed_fallback_paths() {
+    let expand = |allow_missing_formatter, formatter, sink| {
+        let parameters = vec![ParameterSpec {
+            name: String::from("value"),
+            kind: ArgumentKind::Number,
+        }];
+        let arguments =
+            parse_arguments(Some(quote!(value: value)), &parameters, Span::call_site())?;
+        emit_render_expression(
+            InvocationMetadata {
+                needs_formatter: true,
+                cow_macro_output: false,
+                allow_missing_formatter,
+                runtime_anchor: parse_quote!(crate_anchor),
+                parameters,
+            },
+            RenderInvocation {
+                locale: parse_quote!(locale),
+                message_data: parse_quote!(message),
+                formatter,
+                sink,
+                arguments,
+            },
+        )
+    };
+
+    assert!(expand(false, None, None).is_err());
+    assert!(
+        expand(false, None, Some(parse_quote!(&mut output)))
+            .is_ok_and(|tokens| tokens.to_string().contains("render_to"))
+    );
+    assert!(
+        expand(true, None, None).is_ok_and(|tokens| tokens.to_string().contains("render_owned"))
+    );
+}
+
+#[cfg(test)]
 #[test]
 fn supports_schema_parameter_named_underscore() {
-    let metadata = parse2::<InvocationMetadata>(quote!(false, false, [(_, string)]));
+    let metadata =
+        parse2::<InvocationMetadata>(quote!(false, false, false, [crate_anchor], [(_, string)]));
     assert!(metadata.is_ok());
     let Some(metadata) = metadata.ok() else {
         return;
     };
     let arguments = parse_arguments(
-        quote!({ _: value }),
+        Some(quote!(_: value)),
         &metadata.parameters,
         Span::call_site(),
     );
 
     assert!(arguments.is_ok());
-    assert!(parse_arguments(quote!({ _ }), &metadata.parameters, Span::call_site(),).is_err());
+    assert!(parse_arguments(Some(quote!(_)), &metadata.parameters, Span::call_site()).is_err());
 }
 
+#[cfg(test)]
 #[test]
 fn parses_try_expressions_and_trailing_commas() {
     let parameters = vec![
@@ -636,24 +949,58 @@ fn parses_try_expressions_and_trailing_commas() {
         },
     ];
     let expression = parse2::<Expr>(quote!(require_value(first, second)?));
-    let input: TokenStream2 = quote!(require_value(first, second)?, another,);
-    let arguments = parse_arguments(input, &parameters, Span::call_site());
+    let input: TokenStream2 = quote!(
+        first: require_value(first, second)?,
+        second: make_another(first, second),
+    );
+    let arguments = parse_arguments(Some(input), &parameters, Span::call_site());
 
     assert!(expression.is_ok());
     assert!(arguments.is_ok());
 }
 
+#[cfg(test)]
 #[test]
-fn accepts_a_brace_delimited_block_as_a_positional_expression() {
+fn parses_closures_macros_and_nested_expression_commas() {
+    let parameters = vec![
+        ParameterSpec {
+            name: String::from("first"),
+            kind: ArgumentKind::String,
+        },
+        ParameterSpec {
+            name: String::from("second"),
+            kind: ArgumentKind::Number,
+        },
+    ];
+    let arguments = parse_arguments(
+        Some(quote!(
+            first: apply(|left, right| combine(left, right), one, two)?,
+            second: number!(choose(3, 4)),
+        )),
+        &parameters,
+        Span::call_site(),
+    );
+
+    assert!(arguments.is_ok());
+    let Some(arguments) = arguments.ok() else {
+        return;
+    };
+    assert_eq!(arguments.evaluation_order.len(), 2);
+    assert!(arguments.schema_slots == [0, 1]);
+}
+
+#[cfg(test)]
+#[test]
+fn accepts_a_brace_delimited_block_as_a_named_expression() {
     let parameters = vec![ParameterSpec {
         name: String::from("value"),
         kind: ArgumentKind::Number,
     }];
-    let input = quote!({
+    let input = quote!(value: {
         let value = make_value();
         value
     });
-    let arguments = parse_arguments(input, &parameters, Span::call_site());
+    let arguments = parse_arguments(Some(input), &parameters, Span::call_site());
 
     assert!(arguments.is_ok());
     let Some(arguments) = arguments.ok() else {

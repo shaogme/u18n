@@ -1,3 +1,5 @@
+pub(crate) use linked_parts::{LinkedPatternPart, LinkedPluralBranch, LinkedSelectBranch};
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     string::String,
@@ -7,8 +9,6 @@ use std::{
 use u18n_ast::{ArgumentType, LocaleAst, MessageDef, MessageKey, PluralKind, Span};
 
 use crate::cldr::RuleSetData;
-
-pub(crate) use linked_parts::{LinkedPatternPart, LinkedPluralBranch, LinkedSelectBranch};
 
 pub(crate) struct LocaleInput {
     pub(crate) path: String,

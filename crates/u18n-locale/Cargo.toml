@@ -3,7 +3,6 @@ name = "u18n-locale"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "A no_std parser for u18n locale catalogs and typed message patterns."

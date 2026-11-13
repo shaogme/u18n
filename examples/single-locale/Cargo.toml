@@ -3,7 +3,6 @@ name = "u18n-single-locale"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "A compile fixture for generated single-locale catalogs."

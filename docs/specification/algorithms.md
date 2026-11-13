@@ -268,19 +268,26 @@ validate the resulting locale index and exact tag against the shard. By default,
 macro returns `Result<&'static str, RenderError>` through the shard's static-text accessor, and a
 parameterized macro returns `Result<String, RenderError>`. The compile-time
 `cow-macro-output=true` option makes both forms return `Result<RenderedMessage, RenderError>`,
-where the public `RenderedMessage` alias is `Cow<'static, str>`. It selects the runtime's
-`MessageData::render` or `render_with` methods so zero-argument results stay borrowed and
-parameterized results stay owned. The proc-macro helper validates positional arity or named fields,
-evaluates named expressions once in written order, then arranges them in schema order. The locale
-expression is evaluated once; a formatter expression, when required, is evaluated next.
+where the public `RenderedMessage` alias is `Cow<'static, str>`. Text-returning calls use
+`MessageData::render`, `render_with`, `render_owned`, or `render_with_owned` so zero-argument
+results stay borrowed and parameterized results stay owned. A `sink: &mut writer` field instead
+calls `render_to` or `render_with_to` and returns `Result<(), RenderError>` without constructing an
+output string. The sink implements `core::fmt::Write`; a failed write can leave a partial prefix.
+The proc-macro helper validates the complete named `args` object, evaluates `locale`, `formatter`,
+and `sink` once in that fixed order regardless of field placement, evaluates argument expressions
+afterward in their written order, then arranges named values in schema order.
 
-The generated `t!` macro dispatches a literal key to its message macro. Non-atomic builds require a
-`locale = expression` header. Atomic builds use the current lightweight locale by default and may
-still receive an explicit `locale` header. Atomic generation requires an explicit final fallback
-locale; the generated selector uses pointer-width atomics. An optional fixed render-error fallback
-converts `t!` errors to the configured success type. With Cow macro output it lazily returns the
-fallback as `Cow::Borrowed`; otherwise its type follows the message signature. The `m_*` macros,
-`MessageData`, `Catalog`, and streaming calls retain `Result<_, RenderError>`. `current_catalog()` and
+The generated `t!` macro dispatches a `name: string-literal` field to its message macro. Non-atomic
+builds require a `locale` field. Atomic builds use the current lightweight locale by default and may
+still receive an explicit `locale` field. Both macros accept `locale`, optional `formatter`,
+optional `sink`, and optional `args` fields in any order; direct `m_*` calls always require locale.
+Atomic generation requires
+an explicit final fallback locale; the generated selector uses pointer-width atomics. An optional
+fixed render-error fallback converts text-returning `t!` errors to the configured success type.
+With Cow macro output it lazily returns the fallback as `Cow::Borrowed`; otherwise its type follows
+the message signature. Sink `t!` calls return `Result<(), RenderError>` and propagate errors even
+when a fallback is configured. The `m_*` macros, `MessageData`, `Catalog`, and streaming calls retain
+`Result<_, RenderError>`. `current_catalog()` and
 `FINAL_FALLBACK_CATALOG` remain dynamic-ID conveniences.
 
 The input SHA-256 is length-delimited and includes the raw schema source, raw locale sources ordered

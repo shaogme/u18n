@@ -120,15 +120,24 @@ change dynamic or streaming APIs.
 
 ### Generated message calls
 
-Per-message macros accept positional arguments in schema order or named fields. The proc-macro
-helpers check arity and field names, then create typed runtime argument values. Named expressions
-are evaluated once in written order and then placed in schema order. Rust type checking checks
-the values against the generated schema signature.
+Per-message macros require a `locale` field. Both `m_*` and `t!` accept optional `formatter`,
+`sink`, and `args` fields in any order. Non-atomic `t!` calls require `locale`, while atomic calls
+use the current locale when it is omitted. Message parameters appear only in the complete named
+`args` object. The proc-macro helpers check field names and completeness, then create typed runtime
+argument values. Control expressions run once in the fixed order `locale`, `formatter`, `sink`;
+argument expressions run afterward in their written order and are placed in schema order for
+rendering.
+
+Without `sink`, generated macros preserve their text result types. With `sink: &mut writer`, both
+zero-argument and parameterized messages return `Result<(), RenderError>` and call the keyed
+streaming runtime methods without creating an output `String`. The sink must implement
+`core::fmt::Write`; a failed write can leave partial output. Fixed `t!` render-error fallbacks
+apply to text-returning calls only and do not suppress sink errors.
 
 ### Catalog selection and dispatch
 
 `t!` dispatches by a literal message key. In the default build configuration, calls pass a
-`locale = expression` header whose value implements `LocaleProvider`. Optional atomic mode stores
+`locale: expression` field whose value implements `LocaleProvider`. Optional atomic mode stores
 a pointer to the current `Locale` and requires a configured final fallback locale and pointer-width
 atomics. The keyed renderer resolves a provider once, then validates the resulting locale index and
 tag against the shard. `current_catalog()` remains a separate dynamic-ID conversion. See
@@ -136,10 +145,12 @@ tag against the shard. `current_catalog()` remains a separate dynamic-ID convers
 
 ### Typed formatting
 
-Messages whose resolved patterns use a typed format operation accept a formatter argument. The
-runtime's `Formatter` trait receives the selected locale's exact source tag, a typed value,
-closed format options, and a `core::fmt::Write` sink. Formatting policy belongs to the
-application; the runtime does not implement locale-specific number or date formatting.
+Messages whose resolved patterns use a typed format operation accept a `formatter: expression`
+header for text-returning calls. Sink calls may omit it; runtime returns `FormatterRequired` only
+if the selected program needs formatting. The runtime's `Formatter` trait receives the selected
+locale's exact source tag, a typed value, closed format options, and a `core::fmt::Write` sink.
+Formatting policy belongs to the application; the runtime does not implement locale-specific
+number or date formatting.
 
 ## Runtime model
 

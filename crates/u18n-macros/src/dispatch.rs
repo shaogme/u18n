@@ -1,32 +1,23 @@
 use std::iter;
 
-use proc_macro2::TokenStream as TokenStream2;
+use super::invocation::InvocationFields;
+
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
-    Error as SynError, Expr, Ident, LitBool, LitStr, Path, Result, Token, bracketed,
-    ext::IdentExt,
+    Error as SynError, Ident, LitBool, LitStr, Path, Result, Token, bracketed,
     parse::{Parse, ParseStream},
     parse2,
 };
 
 #[cfg(test)]
-use proc_macro2::Span;
-
-#[cfg(test)]
 use syn::parse_str;
 
-struct DispatchArguments {
-    locale: Option<Expr>,
-    formatter: Option<Expr>,
-    values: TokenStream2,
-}
-
 struct DispatchInvocation {
-    key: LitStr,
     atomic_locale: bool,
     anchor: Path,
     render_error_fallback_message: Option<LitStr>,
-    arguments: DispatchArguments,
+    fields: InvocationFields,
 }
 
 struct SelfKey;
@@ -77,8 +68,6 @@ impl SelfKey {
 
 impl Parse for DispatchInvocation {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let key = input.parse::<LitStr>()?;
-        input.parse::<Token![,]>()?;
         let atomic_locale = input.parse::<LitBool>()?.value;
         input.parse::<Token![,]>()?;
         let anchor_content;
@@ -94,106 +83,60 @@ impl Parse for DispatchInvocation {
             None
         };
         input.parse::<Token![;]>()?;
-        let arguments = input.parse::<DispatchArguments>()?;
+        let fields = InvocationFields::parse_tokens(input.parse::<TokenStream2>()?)?;
         Ok(Self {
-            key,
             atomic_locale,
             anchor,
             render_error_fallback_message,
-            arguments,
+            fields,
         })
-    }
-}
-
-impl Parse for DispatchArguments {
-    fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let mut locale = None;
-        let mut formatter = None;
-        let mut formatter_seen = false;
-
-        while Self::starts_control_header(input) {
-            let name = input.parse::<Ident>()?;
-            let name_text = name.unraw().to_string();
-            input.parse::<Token![=]>()?;
-            let expression = input.parse::<Expr>()?;
-            match name_text.as_str() {
-                "locale" => {
-                    if formatter_seen {
-                        return Err(SynError::new(
-                            name.span(),
-                            "the locale header must precede the formatter header",
-                        ));
-                    }
-                    if locale.replace(expression).is_some() {
-                        return Err(SynError::new(name.span(), "duplicate locale header"));
-                    }
-                }
-                "formatter" => {
-                    if formatter.replace(expression).is_some() {
-                        return Err(SynError::new(name.span(), "duplicate formatter header"));
-                    }
-                    formatter_seen = true;
-                }
-                _ => {}
-            }
-            if !input.is_empty() {
-                input.parse::<Token![,]>()?;
-                if input.is_empty() {
-                    break;
-                }
-            }
-        }
-
-        let values = input.parse::<TokenStream2>()?;
-        Ok(Self {
-            locale,
-            formatter,
-            values,
-        })
-    }
-}
-
-impl DispatchArguments {
-    fn starts_control_header(input: ParseStream<'_>) -> bool {
-        let fork = input.fork();
-        let Ok(name) = fork.parse::<Ident>() else {
-            return false;
-        };
-        if !fork.peek(Token![=]) {
-            return false;
-        }
-        matches!(name.unraw().to_string().as_str(), "locale" | "formatter")
     }
 }
 
 impl TranslationDispatcher {
     pub(super) fn expand(input: TokenStream2) -> Result<TokenStream2> {
         let invocation = parse2::<DispatchInvocation>(input)?;
-        let message_name = SelfKey::macro_name(&invocation.key)?;
-        let arguments = invocation.arguments;
-        if !invocation.atomic_locale && arguments.locale.is_none() {
+        let key = invocation.fields.name().ok_or_else(|| {
+            SynError::new(
+                Span::call_site(),
+                "structured `t!` calls require exactly one `name: \"key\"` field",
+            )
+        })?;
+        let message_name = SelfKey::macro_name(key)?;
+        if !invocation.atomic_locale && invocation.fields.locale().is_none() {
             return Err(SynError::new(
-                invocation.key.span(),
-                "non-atomic translation calls require a leading `locale = expression` header",
+                key.span(),
+                "non-atomic translation calls require a `locale: expression` field",
             ));
         }
         let anchor = invocation.anchor;
-        let locale = match arguments.locale {
+        let locale = match invocation.fields.locale() {
             Some(locale) => quote!(#locale),
             None => quote!(#anchor::current_locale()),
         };
-        let formatter = arguments
-            .formatter
+        let formatter = invocation
+            .fields
+            .formatter()
             .map_or_else(TokenStream2::new, |value| quote!(#value));
-        let values = arguments.values;
+        let has_sink = invocation.fields.sink().is_some();
+        let sink = invocation
+            .fields
+            .sink()
+            .map_or_else(TokenStream2::new, |value| quote!(#value));
+        let values = invocation.fields.arguments().cloned().unwrap_or_default();
+        let allow_missing_formatter =
+            invocation.render_error_fallback_message.is_some() && !has_sink;
         let dispatch = quote! {
             #anchor::#message_name! {
-                @__u18n_dispatch [#locale] [#formatter] { #values }
+                @__u18n_dispatch [#allow_missing_formatter] [#locale] [#formatter] [#sink] { #values }
             }
         };
         Ok(match invocation.render_error_fallback_message {
-            Some(fallback) => quote!((#dispatch).unwrap_or_else(|_| #fallback.into())),
+            Some(fallback) if !has_sink => {
+                quote!((#dispatch).unwrap_or_else(|_| #fallback.into()))
+            }
             None => dispatch,
+            Some(_) => dispatch,
         })
     }
 }
@@ -238,44 +181,51 @@ fn rejects_invalid_message_key_shapes() {
 
 #[test]
 fn requires_a_string_literal_key() {
-    assert!(parse2::<DispatchInvocation>(quote!(42, true, [crate_anchor];)).is_err());
+    let invalid = TranslationDispatcher::expand(quote!(true, [crate_anchor]; name: 42));
+    assert!(invalid.is_err());
 }
 
 #[test]
 fn optional_render_error_fallback_wraps_only_the_keyed_dispatch() {
     let fallback = TranslationDispatcher::expand(quote!(
-        "cart.title",
         false,
         [crate_anchor],
         "could not render";
-        locale = &CATALOG
+        locale: &CATALOG,
+        name: "cart.title"
     ));
     let unchanged = TranslationDispatcher::expand(quote!(
-        "cart.title",
         false,
         [crate_anchor];
-        locale = &CATALOG
+        locale: &CATALOG,
+        name: "cart.title"
     ));
 
     assert!(fallback.is_ok_and(|tokens| {
         tokens.to_string().contains("unwrap_or_else")
             && tokens.to_string().contains("could not render")
             && tokens.to_string().contains("m_cart_stitle")
+            && tokens.to_string().contains("true")
     }));
     assert!(unchanged.is_ok_and(|tokens| !tokens.to_string().contains("unwrap_or_else")));
 }
 
 #[test]
-fn parses_control_headers_and_preserves_argument_forms() {
-    let positional =
-        parse2::<DispatchArguments>(quote!(locale = &CATALOG, formatter = &formatter, value,));
-    let named = parse2::<DispatchArguments>(quote!({ value: value, }));
-    let empty_named = parse2::<DispatchArguments>(quote!({}));
+fn parses_reordered_fields_and_preserves_nested_arguments() {
+    let fields = InvocationFields::parse_tokens(quote!(
+        args: { value: value, },
+        sink: &mut output,
+        formatter: &formatter,
+        locale: &CATALOG,
+        name: r#"cart.title"#,
+    ));
+    let named = InvocationFields::parse_tokens(quote!(args: { value: value, }));
+    let empty_named = InvocationFields::parse_tokens(quote!(args: {}));
 
-    assert!(positional.is_ok());
+    assert!(fields.is_ok());
     assert!(named.is_ok());
     assert!(empty_named.is_ok());
-    let Some(positional) = positional.ok() else {
+    let Some(fields) = fields.ok() else {
         return;
     };
     let Some(named) = named.ok() else {
@@ -284,50 +234,85 @@ fn parses_control_headers_and_preserves_argument_forms() {
     let Some(empty_named) = empty_named.ok() else {
         return;
     };
-    assert!(positional.locale.is_some());
-    assert!(positional.formatter.is_some());
-    assert_eq!(positional.values.to_string(), "value ,");
-    assert_eq!(named.values.to_string(), "{ value : value , }");
-    assert_eq!(empty_named.values.to_string(), "{ }");
+    assert!(fields.locale().is_some());
+    assert!(fields.formatter().is_some());
+    assert!(fields.sink().is_some());
+    assert!(
+        fields
+            .name()
+            .is_some_and(|name| name.value() == "cart.title")
+    );
+    assert_eq!(
+        fields.arguments().map(TokenStream2::to_string).as_deref(),
+        Some("value : value ,")
+    );
+    assert_eq!(
+        named.arguments().map(TokenStream2::to_string).as_deref(),
+        Some("value : value ,")
+    );
+    assert_eq!(
+        empty_named
+            .arguments()
+            .map(TokenStream2::to_string)
+            .as_deref(),
+        Some("")
+    );
 }
 
 #[test]
-fn diagnoses_invalid_control_header_order_and_duplicates() {
-    let invalid_headers: [TokenStream2; 4] = [
-        quote!(locale = &CATALOG, locale = other),
-        quote!(formatter = &formatter, locale = &CATALOG),
-        quote!(formatter =),
-        quote!(locale = &CATALOG formatter = &formatter),
+fn diagnoses_duplicate_fields_and_legacy_syntax() {
+    let invalid_headers: [TokenStream2; 5] = [
+        quote!(locale: &CATALOG, locale: other),
+        quote!(sink: &mut output, sink: &mut other),
+        quote!(formatter:),
+        quote!(locale = &CATALOG),
+        quote!(locale: &CATALOG formatter: &formatter),
     ];
     for input in invalid_headers {
-        assert!(parse2::<DispatchArguments>(input).is_err());
+        assert!(InvocationFields::parse_tokens(input).is_err());
     }
 }
 
 #[test]
 fn enforces_mode_locale_rules_and_emits_anchored_dispatch() {
     let atomic = TranslationDispatcher::expand(quote!(
-        r#"cart.decimal_count"#,
         true,
         [crate_anchor];
-        { value, }
+        name: r#"cart.decimal_count"#,
+        args: { value, }
     ));
     let explicit = TranslationDispatcher::expand(quote!(
-        "cart.decimal_count",
         false,
         [crate_anchor];
-        locale = &CATALOG, value
+        locale: &CATALOG,
+        name: "cart.decimal_count",
+        args: { value }
     ));
     let missing_locale = TranslationDispatcher::expand(quote!(
-        "cart.decimal_count",
         false,
         [crate_anchor];
-        value
+        name: "cart.decimal_count",
+        args: { value }
+    ));
+    let sink_fallback = TranslationDispatcher::expand(quote!(
+        false,
+        [crate_anchor],
+        "could not render";
+        locale: &CATALOG,
+        name: "cart.decimal_count",
+        sink: &mut output,
+        args: { value }
     ));
 
     assert!(atomic.is_ok());
     assert!(explicit.is_ok());
     assert!(missing_locale.is_err());
+    assert!(sink_fallback.is_ok_and(|tokens| {
+        let rendered = tokens.to_string();
+        rendered.contains("@ __u18n_dispatch")
+            && rendered.contains("output")
+            && !rendered.contains("unwrap_or_else")
+    }));
     assert!(atomic.is_ok_and(|tokens| {
         tokens
             .to_string()

@@ -3,7 +3,6 @@ name = "u18n-macros"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Procedural macro helpers for generated u18n message APIs."

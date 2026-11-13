@@ -10,10 +10,10 @@ Add the runtime to your application and the compiler as a build dependency:
 
 ```toml
 [dependencies]
-u18n = "0.3.1"
+u18n = "0.4.0"
 
 [build-dependencies]
-u18n-compiler = "0.3.1"
+u18n-compiler = "0.4.0"
 ```
 
 Create these files in the package root:
@@ -156,8 +156,9 @@ u18n-cli compile --schema schema.u18n --locale locales/en.u18n \
 
 ## 5. Render a message
 
-Use the generated per-message macros with a locale value and arguments in schema order. `Locale`,
-`&Locale`, generated `LocaleTag`, and application types implementing `LocaleProvider` are accepted:
+Use the generated per-message macros with a `locale` field. Put every message parameter in the
+named `args` object; fields may appear in any order. `Locale`, `&Locale`, generated `LocaleTag`, and
+application types implementing `LocaleProvider` are accepted:
 
 ```rust
 use std::error::Error;
@@ -173,27 +174,34 @@ fn main() -> Result<(), Box<dyn Error>> {
         .expect("the build includes es-419");
     let spanish = spanish_tag.as_locale();
 
-    println!("{}", m_app_stitle!(english)?);
-    println!("{}", m_cart_sitems!(english, PluralCount::new(2))?);
-    println!("{}", m_app_stitle!(spanish_tag)?);
-    println!("{}", m_cart_sitems!(spanish, PluralCount::new(0))?);
-    println!("{}", m_cart_shint!(spanish)?);
+    println!("{}", m_app_stitle! { locale: english }?);
+    println!("{}", m_cart_sitems! { locale: english, args: { count: PluralCount::new(2) } }?);
+    println!("{}", m_app_stitle! { locale: spanish_tag }?);
+    println!("{}", m_cart_sitems! { locale: spanish, args: { count: PluralCount::new(0) } }?);
+    println!("{}", m_cart_shint! { locale: spanish }?);
     Ok(())
 }
 ```
 
 The generated macro names encode message keys: `app.title` becomes `m_app_stitle!`, and
-`cart.items` becomes `m_cart_sitems!`. You can also use named arguments when a message has
-several parameters. The key-based `t!` macro dispatches by a literal key; in the default
-non-atomic mode, pass a locale provider with a `locale = expression` header:
+`cart.items` becomes `m_cart_sitems!`. The `locale`, optional `formatter`, optional `sink`, and
+optional `args` fields may appear in any order. Argument values are evaluated in their written
+order, then passed to rendering in schema order. The key-based `t!` macro uses a `name` string
+literal and the same fields; in the default non-atomic mode, include `locale`:
 
 ```rust
-let text = t!(
-    "cart.items",
-    locale = spanish_tag,
-    { count: PluralCount::new(2) }
-);
+let text = t! {
+    args: { count: PluralCount::new(2) },
+    locale: spanish_tag,
+    name: "cart.items",
+};
 ```
+
+For a zero-parameter message, `t!("app.title")` remains a shorthand. It uses the current locale
+in atomic mode; in non-atomic mode, use the structured form with `name` and `locale`. A direct
+message call requires `locale`, even in atomic mode. Parameterized messages always use a complete
+named `args` object, including for a single parameter; a zero-parameter message may omit `args` or
+write `args: {}`.
 
 By default, key macros for messages with no schema parameters return
 `Result<&'static str, RenderError>`, and parameterized key macros return `Result<String,
@@ -204,7 +212,27 @@ type. Call `.into_owned()` when a call must yield a `String` in every case. With
 in the build script above, `m_*` calls return the Cow result and `t!` lazily converts the fixed
 error fallback to a borrowed Cow. Without Cow output, the fallback's success type follows the
 message signature. The [Result-returning example](../examples/result-api/README.md) shows `t!`
-without a fixed fallback.
+without a fixed fallback. To append rendered text to a writer instead, add a `sink` header:
+
+```rust
+let mut output = String::from("prefix: ");
+m_cart_sitems! { locale: english, sink: &mut output, args: { count: PluralCount::new(2) } }?;
+t! { name: "cart.items", locale: english, sink: &mut output, args: { count: PluralCount::new(2) } }?;
+```
+
+Sink calls return `Result<(), RenderError>` and write directly to `core::fmt::Write`. They append
+to existing content; a failure can leave a partial message in the sink. Fixed `t!` fallbacks apply
+only to text-returning calls, since a sink cannot roll back partial output.
+
+This syntax change requires migrating calls that used `=` controls, positional arguments, or
+key-first `t!` calls with extra fields:
+
+| Old call | New call |
+| --- | --- |
+| `m_key!(locale = loc, value)` | `m_key! { locale: loc, args: { value: value } }` |
+| `m_key!(locale = loc, { count, owner })` | `m_key! { locale: loc, args: { count, owner } }` |
+| `t!("key", locale = loc, { count })` | `t! { name: "key", locale: loc, args: { count } }` |
+| `t!("app.title")` | Retained for zero-parameter messages |
 
 `LocaleTag::from_str` accepts ASCII case variations and returns the authored spelling from
 `as_str()`. Source fallback targets remain case-sensitive. The Spanish `cart.hint` call above
